@@ -6,8 +6,8 @@ import asyncio
 import json
 import os
 
-API_TOKEN = '8021681635:AAHUzI04WkaX7Qh6oGahtf864XucbbapcOI'
-CHANNEL_ID = -1002096782736  # Замени на ID твоего канала
+API_TOKEN = os.getenv("API_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
