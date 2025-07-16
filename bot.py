@@ -21,7 +21,7 @@ WEBAPP_PORT = int(os.getenv("PORT", default=8000))
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
-DB_FILE = "subscriptions.json"
+DB_FILE = "/data/subscriptions.json"
 
 def load_subscriptions():
     if os.path.exists(DB_FILE):
