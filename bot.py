@@ -1,7 +1,7 @@
-
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ParseMode
 from aiogram.utils.executor import start_webhook
+from aiogram.dispatcher.webhook import get_new_configured_app
 from datetime import datetime, timedelta
 import asyncio
 import json
@@ -9,19 +9,22 @@ import os
 
 API_TOKEN = os.getenv("API_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # Например: https://your-app.onrender.com
+
+# Настройка webhook
 WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
+# Настройки приложения
 WEBAPP_HOST = "0.0.0.0"
-WEBAPP_PORT = int(os.getenv("PORT", default=8000))  # Render передаёт PORT
+WEBAPP_PORT = int(os.getenv("PORT", default=8000))
 
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
 DB_FILE = "subscriptions.json"
 
+# Загрузка и сохранение подписок
 def load_subscriptions():
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r") as f:
@@ -34,6 +37,7 @@ def save_subscriptions(data):
 
 subscriptions = load_subscriptions()
 
+# Команды
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
     await message.reply("Привет! Я бот для подписок. Используй /add @username 7")
@@ -51,6 +55,7 @@ async def add_subscription(message: types.Message):
     except:
         await message.reply("❗ Используй команду так: /add @username 7")
 
+# Проверка истёкших подписок
 async def check_expired():
     while True:
         now = datetime.now().date()
@@ -73,6 +78,7 @@ async def check_expired():
         save_subscriptions(subscriptions)
         await asyncio.sleep(86400)
 
+# Старт и остановка
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(check_expired())
@@ -80,12 +86,8 @@ async def on_startup(dp):
 async def on_shutdown(dp):
     await bot.delete_webhook()
 
+# Запуск
 if __name__ == '__main__':
-    from aiohttp import web
-    async def handle(request):
-        return web.Response(text="Bot is running.")
-
-    from aiogram.dispatcher.webhook import get_new_configured_app
     start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
