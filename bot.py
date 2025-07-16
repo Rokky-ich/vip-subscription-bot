@@ -7,20 +7,17 @@ import json
 import os
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # Пример: https://your-app.onrender.com
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # должен начинаться с -100
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
+CHANNEL_LINK = os.getenv("CHANNEL_LINK")
 
 WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", default=8000))
 
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
-
-# Укажи здесь свой Telegram user ID
-ADMIN_ID = 1279721354  # например: 123456789
 
 DB_FILE = "subscriptions.json"
 
@@ -37,50 +34,69 @@ def save_subscriptions(data):
 subscriptions = load_subscriptions()
 
 @dp.message_handler(commands=['start'])
-async def send_welcome(message: types.Message):
+async def start_handler(message: types.Message):
     user_id = message.from_user.id
     username = message.from_user.username or "без username"
-    await message.reply("Привет! Я бот для подписок. Используй /add @username 7")
 
-    # Уведомление админу
-    await bot.send_message(
-        ADMIN_ID,
-        f"🔔 Новый пользователь нажал /start:\n👤 Username: @{username}\n🆔 ID: <code>{user_id}</code>",
+    # Установка подписки на 2 дня
+    end_date = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+    subscriptions[str(user_id)] = end_date
+    save_subscriptions(subscriptions)
+
+    # Отправка ссылки пользователю
+    await message.answer(
+        f"✅ Привет, @{username or 'друг'}!\n"
+        f"Ты получил доступ на 2 дня.\n\n"
+        f"🔗 <b>Вот ссылка на канал:</b>\n{CHANNEL_LINK}",
         parse_mode="HTML"
     )
 
-@dp.message_handler(commands=['add'])
+    # Уведомление админу
+    await bot.send_message(
+        chat_id=message.from_user.id,
+        text=f"🔔 Выдан доступ до <b>{end_date}</b>",
+        parse_mode="HTML"
+    )
+
+@dp.message_handler(commands=['add'])  # опционально, можно удалить если не нужно вручную
 async def add_subscription(message: types.Message):
     try:
-        _, username, days = message.text.split()
+        _, id_or_username, days = message.text.split()
         days = int(days)
-        user_id = username.strip('@')
+        user_key = id_or_username.strip("@")
         end_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
-        subscriptions[user_id] = end_date
+        subscriptions[user_key] = end_date
         save_subscriptions(subscriptions)
-        await message.reply(f"@{user_id} добавлен до {end_date}")
+        await message.reply(f"{id_or_username} добавлен до {end_date}")
     except:
-        await message.reply("❗ Используй команду так: /add @username 7")
+        await message.reply("❗ Используй: /add <id> <дней>")
 
 async def check_expired():
     while True:
         now = datetime.now().date()
         to_remove = []
-        for user, end_str in subscriptions.items():
+        for user_id, end_str in subscriptions.items():
             end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+
             if end_date == now + timedelta(days=1):
                 try:
-                    await bot.send_message(f"@{user}", "⏳ Завтра заканчивается твоя подписка!")
+                    await bot.send_message(int(user_id), "⏳ Завтра заканчивается твоя подписка!")
                 except:
                     pass
+
             elif end_date <= now:
                 try:
-                    await bot.send_message(f"@{user}", "❌ Твоя подписка закончилась. Ты удалён из канала.")
-                    to_remove.append(user)
+                    await bot.send_message(int(user_id), "❌ Подписка истекла. Ты удалён из канала.")
+                    await bot.kick_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))
+                    await asyncio.sleep(1)
+                    await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))  # Чтобы мог зайти снова
+                    to_remove.append(user_id)
                 except:
                     pass
-        for user in to_remove:
-            subscriptions.pop(user, None)
+
+        for user_id in to_remove:
+            subscriptions.pop(user_id, None)
+
         save_subscriptions(subscriptions)
         await asyncio.sleep(86400)
 
@@ -92,7 +108,6 @@ async def on_shutdown(dp):
     await bot.delete_webhook()
 
 if __name__ == '__main__':
-    from aiogram.dispatcher.webhook import get_new_configured_app
     start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
