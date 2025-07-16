@@ -7,9 +7,11 @@ import json
 import os
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # должен начинаться с -100
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Должен начинаться с -100
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 CHANNEL_LINK = os.getenv("CHANNEL_LINK")
+
+ADMIN_ID = 1279721354  # Твой Telegram user ID
 
 WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
@@ -38,27 +40,27 @@ async def start_handler(message: types.Message):
     user_id = message.from_user.id
     username = message.from_user.username or "без username"
 
-    # Установка подписки на 2 дня
+    # Срок подписки — 2 дня
     end_date = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
     subscriptions[str(user_id)] = end_date
     save_subscriptions(subscriptions)
 
     # Отправка ссылки пользователю
     await message.answer(
-        f"✅ Привет, @{username or 'друг'}!\n"
-        f"Ты получил доступ на 2 дня.\n\n"
-        f"🔗 <b>Вот ссылка на канал:</b>\n{CHANNEL_LINK}",
+        f"✅ Привет, @{username}!\n"
+        f"Ты получил доступ на <b>2 дня</b>.\n\n"
+        f"🔗 <b>Ссылка на канал:</b>\n{CHANNEL_LINK}",
         parse_mode="HTML"
     )
 
     # Уведомление админу
     await bot.send_message(
-        chat_id=message.from_user.id,
-        text=f"🔔 Выдан доступ до <b>{end_date}</b>",
+        chat_id=ADMIN_ID,
+        text=f"👤 @{username} (ID: <code>{user_id}</code>) получил доступ до <b>{end_date}</b>",
         parse_mode="HTML"
     )
 
-@dp.message_handler(commands=['add'])  # опционально, можно удалить если не нужно вручную
+@dp.message_handler(commands=['add'])  # Опционально
 async def add_subscription(message: types.Message):
     try:
         _, id_or_username, days = message.text.split()
@@ -68,37 +70,37 @@ async def add_subscription(message: types.Message):
         subscriptions[user_key] = end_date
         save_subscriptions(subscriptions)
         await message.reply(f"{id_or_username} добавлен до {end_date}")
-    except:
-        await message.reply("❗ Используй: /add <id> <дней>")
+    except Exception as e:
+        await message.reply(f"❗ Ошибка: {e}\nИспользуй: /add <id> <дней>")
 
 async def check_expired():
     while True:
         now = datetime.now().date()
         to_remove = []
+
         for user_id, end_str in subscriptions.items():
-            end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+            try:
+                end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
 
-            if end_date == now + timedelta(days=1):
-                try:
+                if end_date == now + timedelta(days=1):
                     await bot.send_message(int(user_id), "⏳ Завтра заканчивается твоя подписка!")
-                except:
-                    pass
 
-            elif end_date <= now:
-                try:
+                elif end_date <= now:
                     await bot.send_message(int(user_id), "❌ Подписка истекла. Ты удалён из канала.")
                     await bot.kick_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))
                     await asyncio.sleep(1)
-                    await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))  # Чтобы мог зайти снова
+                    await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))  # Чтобы мог вернуться
                     to_remove.append(user_id)
-                except:
-                    pass
+
+            except Exception as e:
+                print(f"[❌] Ошибка при проверке {user_id}: {e}")
+                await bot.send_message(ADMIN_ID, f"⚠️ Ошибка удаления {user_id}:\n<code>{e}</code>", parse_mode="HTML")
 
         for user_id in to_remove:
             subscriptions.pop(user_id, None)
 
         save_subscriptions(subscriptions)
-        await asyncio.sleep(86400)
+        await asyncio.sleep(3600)  # Проверка раз в час
 
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
