@@ -68,7 +68,14 @@ async def handle_admin_action(callback: CallbackQuery):
         end_date = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
         subscriptions[user_id] = end_date
         save_subscriptions(subscriptions)
-        await bot.send_message(int(user_id), f"✅ Доступ одобрен!\n<b>Ссылка на канал:</b> {CHANNEL_LINK}", parse_mode="HTML")
+
+        # 👇 Кнопка вместо ссылки
+        keyboard = InlineKeyboardMarkup().add(
+            InlineKeyboardButton("🔗 Перейти в канал", url=CHANNEL_LINK)
+        )
+
+        await bot.send_message(int(user_id), f"✅ Доступ одобрен! Нажми кнопку ниже, чтобы перейти в канал:",
+                               reply_markup=keyboard)
         await bot.send_message(ADMIN_ID, f"✅ @{username} (ID: {user_id}) был одобрен до {end_date}.")
     else:
         await bot.send_message(int(user_id), "❌ Доступ отклонён.")
