@@ -7,9 +7,8 @@ import json
 import os
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Должен начинаться с -100
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
-CHANNEL_LINK = os.getenv("CHANNEL_LINK")
 ADMIN_ID = 1279721354
 
 WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
@@ -69,14 +68,24 @@ async def handle_admin_action(callback: CallbackQuery):
         subscriptions[user_id] = end_date
         save_subscriptions(subscriptions)
 
-        # 👇 Кнопка вместо ссылки
-        keyboard = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("🔗 Перейти в канал", url=CHANNEL_LINK)
-        )
+        try:
+            invite = await bot.create_chat_invite_link(
+                chat_id=CHANNEL_ID,
+                expire_date=int((datetime.now() + timedelta(days=1)).timestamp()),
+                member_limit=1
+            )
+            keyboard = InlineKeyboardMarkup().add(
+                InlineKeyboardButton("🔗 Перейти в канал", url=invite.invite_link)
+            )
 
-        await bot.send_message(int(user_id), f"✅ Доступ одобрен! Нажми кнопку ниже, чтобы перейти в канал:",
-                               reply_markup=keyboard)
-        await bot.send_message(ADMIN_ID, f"✅ @{username} (ID: {user_id}) был одобрен до {end_date}.")
+            await bot.send_message(int(user_id),
+                                   "✅ Доступ одобрен! Нажми кнопку ниже, чтобы перейти в канал:",
+                                   reply_markup=keyboard)
+            await bot.send_message(ADMIN_ID,
+                                   f"✅ @{username} (ID: {user_id}) был одобрен до {end_date}.")
+        except Exception as e:
+            await bot.send_message(ADMIN_ID, f"❗ Ошибка создания ссылки для {user_id}:\n<code>{e}</code>",
+                                   parse_mode="HTML")
     else:
         await bot.send_message(int(user_id), "❌ Доступ отклонён.")
         await bot.send_message(ADMIN_ID, f"🚫 @{username} (ID: {user_id}) был отклонён.")
@@ -107,7 +116,9 @@ async def check_expired():
 
             except Exception as e:
                 print(f"Ошибка при проверке {user_id}: {e}")
-                await bot.send_message(ADMIN_ID, f"⚠️ Ошибка удаления {user_id}:\n<code>{e}</code>", parse_mode="HTML")
+                await bot.send_message(ADMIN_ID,
+                                       f"⚠️ Ошибка удаления {user_id}:\n<code>{e}</code>",
+                                       parse_mode="HTML")
 
         for user_id in to_remove:
             subscriptions.pop(user_id, None)
