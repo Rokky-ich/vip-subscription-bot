@@ -1,5 +1,5 @@
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode
+from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.utils.executor import start_webhook
 from datetime import datetime, timedelta
 import asyncio
@@ -7,11 +7,10 @@ import json
 import os
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Должен начинаться с -100
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 CHANNEL_LINK = os.getenv("CHANNEL_LINK")
-
-ADMIN_ID = 1279721354  # Твой Telegram user ID
+ADMIN_ID = 1279721354
 
 WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
@@ -22,6 +21,7 @@ bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
 DB_FILE = "/data/subscriptions.json"
+pending_requests = {}
 
 def load_subscriptions():
     if os.path.exists(DB_FILE):
@@ -37,43 +37,48 @@ subscriptions = load_subscriptions()
 
 @dp.message_handler(commands=['start'])
 async def start_handler(message: types.Message):
-    user_id = message.from_user.id
+    user_id = str(message.from_user.id)
     username = message.from_user.username or "без username"
 
-    # Срок подписки — 2 дня
-    end_date = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
-    subscriptions[str(user_id)] = end_date
-    save_subscriptions(subscriptions)
+    if user_id in subscriptions:
+        await message.answer("✅ Ты уже подписан.")
+        return
 
-    # Отправка ссылки пользователю
-    await message.answer(
-        f"✅ Привет, @{username}!\n"
-        f"Ты получил доступ на <b>2 дня</b>.\n\n"
-        f"🔗 <b>Ссылка на канал:</b>\n{CHANNEL_LINK}",
-        parse_mode="HTML"
+    pending_requests[user_id] = username
+    await message.answer("⏳ Запрос отправлен администратору. Ожидайте подтверждения.")
+
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("✅ Одобрить", callback_data=f"approve:{user_id}"),
+        InlineKeyboardButton("❌ Отклонить", callback_data=f"deny:{user_id}")
     )
 
-    # Уведомление админу
     await bot.send_message(
-        chat_id=ADMIN_ID,
-        text=f"👤 @{username} (ID: <code>{user_id}</code>) получил доступ до <b>{end_date}</b>",
-        parse_mode="HTML"
+        ADMIN_ID,
+        f"🔔 Запрос от пользователя:\n👤 @{username}\n🆔 <code>{user_id}</code>",
+        parse_mode="HTML",
+        reply_markup=keyboard
     )
 
-@dp.message_handler(commands=['add'])  # Опционально
-async def add_subscription(message: types.Message):
-    try:
-        _, id_or_username, days = message.text.split()
-        days = int(days)
-        user_key = id_or_username.strip("@")
-        end_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
-        subscriptions[user_key] = end_date
+@dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
+async def handle_admin_action(callback: CallbackQuery):
+    action, user_id = callback.data.split(":")
+    username = pending_requests.get(user_id, "неизвестен")
+
+    if action == "approve":
+        end_date = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+        subscriptions[user_id] = end_date
         save_subscriptions(subscriptions)
-        await message.reply(f"{id_or_username} добавлен до {end_date}")
-    except Exception as e:
-        await message.reply(f"❗ Ошибка: {e}\nИспользуй: /add <id> <дней>")
+        await bot.send_message(int(user_id), f"✅ Доступ одобрен!\n<b>Ссылка на канал:</b> {CHANNEL_LINK}", parse_mode="HTML")
+        await bot.send_message(ADMIN_ID, f"✅ @{username} (ID: {user_id}) был одобрен до {end_date}.")
+    else:
+        await bot.send_message(int(user_id), "❌ Доступ отклонён.")
+        await bot.send_message(ADMIN_ID, f"🚫 @{username} (ID: {user_id}) был отклонён.")
+
+    pending_requests.pop(user_id, None)
+    await callback.answer()
 
 async def check_expired():
+    already_notified = set()
     while True:
         now = datetime.now().date()
         to_remove = []
@@ -82,25 +87,27 @@ async def check_expired():
             try:
                 end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
 
-                if end_date == now + timedelta(days=1):
+                if end_date == now + timedelta(days=1) and user_id not in already_notified:
                     await bot.send_message(int(user_id), "⏳ Завтра заканчивается твоя подписка!")
+                    already_notified.add(user_id)
 
                 elif end_date <= now:
                     await bot.send_message(int(user_id), "❌ Подписка истекла. Ты удалён из канала.")
                     await bot.kick_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))
                     await asyncio.sleep(1)
-                    await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))  # Чтобы мог вернуться
+                    await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))
                     to_remove.append(user_id)
 
             except Exception as e:
-                print(f"[❌] Ошибка при проверке {user_id}: {e}")
+                print(f"Ошибка при проверке {user_id}: {e}")
                 await bot.send_message(ADMIN_ID, f"⚠️ Ошибка удаления {user_id}:\n<code>{e}</code>", parse_mode="HTML")
 
         for user_id in to_remove:
             subscriptions.pop(user_id, None)
 
         save_subscriptions(subscriptions)
-        await asyncio.sleep(3600)  # Проверка раз в час
+        await asyncio.sleep(86400)
+        already_notified.clear()
 
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
