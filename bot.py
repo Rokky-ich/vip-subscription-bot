@@ -34,17 +34,29 @@ def save_subscriptions(data):
 
 subscriptions = load_subscriptions()
 
+def get_start_keyboard():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(types.KeyboardButton("🚀 Start"))
+    return keyboard
+
 @dp.message_handler(commands=['start'])
+async def start_command(message: types.Message):
+    await message.answer(
+        "👋 Witaj! Kliknij przycisk poniżej, aby rozpocząć.",
+        reply_markup=get_start_keyboard()
+    )
+
+@dp.message_handler(lambda message: message.text == "🚀 Start")
 async def start_handler(message: types.Message):
     user_id = str(message.from_user.id)
-    username = message.from_user.username or "без username"
+    username = message.from_user.username or "bez username"
 
     if user_id in subscriptions:
-        await message.answer("✅ Ты уже подписан.")
+        await message.answer("✅ Masz już aktywny dostęp.")
         return
 
     pending_requests[user_id] = username
-    await message.answer("⏳ Запрос отправлен администратору. Ожидайте подтверждения.")
+    await message.answer("⏳ Twoja prośba została wysłana do administratora. Proszę czekać na zatwierdzenie.")
 
     keyboard = InlineKeyboardMarkup().add(
         InlineKeyboardButton("✅ Одобрить", callback_data=f"approve:{user_id}"),
@@ -61,10 +73,10 @@ async def start_handler(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
 async def handle_admin_action(callback: CallbackQuery):
     action, user_id = callback.data.split(":")
-    username = pending_requests.get(user_id, "неизвестен")
+    username = pending_requests.get(user_id, "nieznany")
 
     if action == "approve":
-        end_date = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+        end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         subscriptions[user_id] = end_date
         save_subscriptions(subscriptions)
 
@@ -75,20 +87,20 @@ async def handle_admin_action(callback: CallbackQuery):
                 member_limit=1
             )
             keyboard = InlineKeyboardMarkup().add(
-                InlineKeyboardButton("🔗 Перейти в канал", url=invite.invite_link)
+                InlineKeyboardButton("🔗 Dołącz do kanału", url=invite.invite_link)
             )
 
             await bot.send_message(int(user_id),
-                                   "✅ Доступ одобрен! Нажми кнопку ниже, чтобы перейти в канал:",
+                                   "✅ Dostęp zatwierdzony! Kliknij przycisk poniżej, aby dołączyć do kanału:",
                                    reply_markup=keyboard)
             await bot.send_message(ADMIN_ID,
-                                   f"✅ @{username} (ID: {user_id}) был одобрен до {end_date}.")
+                                   f"✅ @{username} (ID: {user_id}) został zatwierdzony do {end_date}.")
         except Exception as e:
-            await bot.send_message(ADMIN_ID, f"❗ Ошибка создания ссылки для {user_id}:\n<code>{e}</code>",
+            await bot.send_message(ADMIN_ID, f"❗ Błąd przy tworzeniu linku dla {user_id}:\n<code>{e}</code>",
                                    parse_mode="HTML")
     else:
-        await bot.send_message(int(user_id), "❌ Доступ отклонён.")
-        await bot.send_message(ADMIN_ID, f"🚫 @{username} (ID: {user_id}) был отклонён.")
+        await bot.send_message(int(user_id), "❌ Dostęp odrzucony.")
+        await bot.send_message(ADMIN_ID, f"🚫 @{username} (ID: {user_id}) został odrzucony.")
 
     pending_requests.pop(user_id, None)
     await callback.answer()
@@ -104,20 +116,20 @@ async def check_expired():
                 end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
 
                 if end_date == now + timedelta(days=1) and user_id not in already_notified:
-                    await bot.send_message(int(user_id), "⏳ Завтра заканчивается твоя подписка!")
+                    await bot.send_message(int(user_id), "⏳ Twoja subskrypcja kończy się jutro!")
                     already_notified.add(user_id)
 
                 elif end_date <= now:
-                    await bot.send_message(int(user_id), "❌ Подписка истекла. Ты удалён из канала.")
+                    await bot.send_message(int(user_id), "❌ Subskrypcja wygasła. Zostałeś usunięty z kanału.")
                     await bot.kick_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))
                     await asyncio.sleep(1)
                     await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))
                     to_remove.append(user_id)
 
             except Exception as e:
-                print(f"Ошибка при проверке {user_id}: {e}")
+                print(f"Błąd przy sprawdzaniu {user_id}: {e}")
                 await bot.send_message(ADMIN_ID,
-                                       f"⚠️ Ошибка удаления {user_id}:\n<code>{e}</code>",
+                                       f"⚠️ Błąd przy usuwaniu {user_id}:\n<code>{e}</code>",
                                        parse_mode="HTML")
 
         for user_id in to_remove:
