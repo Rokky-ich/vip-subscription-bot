@@ -127,24 +127,17 @@ async def check_expired():
         await asyncio.sleep(86400)
         notified.clear()
 
-# ====== STRIPE SERVER ======
-async def start_stripe_server():
-    stripe_app = web.Application()
-    stripe_app.router.add_post("/stripe", stripe_webhook)
-    runner = web.AppRunner(stripe_app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8001)  # Отдельный порт под Stripe
-    await site.start()
-    print("✅ Stripe webhook server running on port 8001")
-
 # ====== STARTUP & SHUTDOWN ======
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(check_expired())
-    asyncio.create_task(start_stripe_server())
 
 async def on_shutdown(dp):
     await bot.delete_webhook()
+
+# ====== WEBAPP INIT ======
+app = web.Application()
+app.router.add_post("/stripe", stripe_webhook)
 
 # ====== RUN WEBHOOK ======
 if __name__ == '__main__':
@@ -155,5 +148,6 @@ if __name__ == '__main__':
         on_shutdown=on_shutdown,
         skip_updates=True,
         host=WEBAPP_HOST,
-        port=WEBAPP_PORT
+        port=WEBAPP_PORT,
+        web_app=app
     )
