@@ -23,7 +23,6 @@ stripe.api_key = STRIPE_SECRET_KEY
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
-# Хранилище оплат (в реале замени на БД)
 subscriptions = set()
 
 @dp.message_handler(commands=['start'])
@@ -44,7 +43,7 @@ async def start_cmd(message: types.Message):
             'quantity': 1
         }],
         mode='payment',
-        success_url='https://t.me/your_channel_link',  # желательно поставить свой канал
+        success_url='https://t.me/your_channel_link',
         cancel_url='https://t.me/your_channel_link',
         metadata={'user_id': user_id}
     )
@@ -60,7 +59,7 @@ async def verify_cmd(message: types.Message):
     else:
         await message.answer("❌ Nie znaleziono płatności.")
 
-# Stripe webhook (в том же приложении)
+# Stripe webhook
 async def handle_stripe_webhook(request):
     payload = await request.read()
     sig_header = request.headers.get("stripe-signature")
@@ -82,23 +81,31 @@ async def handle_stripe_webhook(request):
 
     return web.Response(status=200)
 
-# Создаём сервер aiohttp и на него вешаем Stripe webhook
+# Веб-сервер для Stripe webhook
+async def stripe_webhook_runner():
+    app = web.Application()
+    app.router.add_post("/stripe_webhook", handle_stripe_webhook)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8001)
+    await site.start()
+
+# Старт и остановка бота
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
-
-    app = dp.bot['app']
-    app.router.add_post("/stripe_webhook", handle_stripe_webhook)
+    asyncio.create_task(stripe_webhook_runner())
 
 async def on_shutdown(dp):
     await bot.delete_webhook()
 
-def main():
-    app = web.Application()
-    app["bot"] = bot
-    bot["app"] = app
-
-    dp["app"] = app
-    web.run_app(app, host=WEBAPP_HOST, port=WEBAPP_PORT)
-
+# Запуск
 if __name__ == '__main__':
-    main()
+    start_webhook(
+        dispatcher=dp,
+        webhook_path=WEBHOOK_PATH,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        skip_updates=True,
+        host=WEBAPP_HOST,
+        port=WEBAPP_PORT,
+    )
