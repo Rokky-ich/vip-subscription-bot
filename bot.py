@@ -1,19 +1,22 @@
 import os
+import json
 import stripe
 import asyncio
-import json
 from datetime import datetime, timedelta
 from aiohttp import web
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.executor import start_webhook
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.client.default import DefaultBotProperties
 
-# === Настройки окружения ===
+# === Конфигурация окружения ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
@@ -21,16 +24,10 @@ WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 8000))
 
+DB_FILE = "/data/subscriptions.json"
 stripe.api_key = STRIPE_SECRET_KEY
 
-# === Инициализация бота ===
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
-
-# === Файл базы данных ===
-DB_FILE = "/data/subscriptions.json"
-pending_requests = {}
-
+# === База подписок ===
 def load_subscriptions():
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r") as f:
@@ -43,9 +40,13 @@ def save_subscriptions(data):
 
 subscriptions = load_subscriptions()
 
+# === Инициализация бота и диспетчера ===
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher(storage=MemoryStorage())
+
 # === Команда /start ===
-@dp.message_handler(commands=["start"])
-async def cmd_start(message: types.Message):
+@dp.message(F.text == "/start")
+async def start(message: types.Message):
     user_id = str(message.from_user.id)
 
     if user_id in subscriptions:
@@ -63,7 +64,7 @@ async def cmd_start(message: types.Message):
             'quantity': 1
         }],
         mode='payment',
-        success_url='https://t.me/Twoj_kanal',  # Можно оставить, не используется
+        success_url='https://t.me/Twoj_kanal',
         cancel_url='https://t.me/Twoj_kanal',
         metadata={'user_id': user_id}
     )
@@ -71,26 +72,26 @@ async def cmd_start(message: types.Message):
     await message.answer("💳 Kliknij w link, aby dokonać płatności:")
     await message.answer(session.url)
 
-# === Команда /verify (для ручной проверки) ===
-@dp.message_handler(commands=["verify"])
-async def cmd_verify(message: types.Message):
+# === Команда /verify ===
+@dp.message(F.text == "/verify")
+async def verify(message: types.Message):
     user_id = str(message.from_user.id)
-
-    if user_id in subscriptions:
-        try:
-            invite = await bot.create_chat_invite_link(
-                chat_id=CHANNEL_ID,
-                expire_date=int((datetime.now() + timedelta(days=1)).timestamp()),
-                member_limit=1
-            )
-            keyboard = InlineKeyboardMarkup().add(
-                InlineKeyboardButton("🔗 Dołącz do kanału", url=invite.invite_link)
-            )
-            await message.answer("✅ Twoja subskrypcja została potwierdzona!", reply_markup=keyboard)
-        except Exception as e:
-            await message.answer(f"❌ Błąd: {e}")
-    else:
+    if user_id not in subscriptions:
         await message.answer("❌ Nie znaleziono aktywnej subskrypcji.")
+        return
+
+    try:
+        invite = await bot.create_chat_invite_link(
+            chat_id=CHANNEL_ID,
+            expire_date=int((datetime.now() + timedelta(days=1)).timestamp()),
+            member_limit=1
+        )
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🔗 Dołącz do kanału", url=invite.invite_link)]]
+        )
+        await message.answer("✅ Twoja subskrypcja została potwierdzona!", reply_markup=kb)
+    except Exception as e:
+        await message.answer(f"❌ Błąd: {e}")
 
 # === Stripe Webhook ===
 async def stripe_webhook(request):
@@ -100,46 +101,34 @@ async def stripe_webhook(request):
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception as e:
-        print("❌ Webhook error:", str(e))
+        print("❌ Stripe webhook error:", e)
         return web.Response(status=400)
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-        print("✅ Получена сессия Stripe:", session)  # логируем весь объект
+        user_id = session.get("metadata", {}).get("user_id")
+        if user_id:
+            user_id = str(user_id)
+            if user_id not in subscriptions:
+                subscriptions[user_id] = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+                save_subscriptions(subscriptions)
 
-        metadata = session.get("metadata", {})
-        user_id = metadata.get("user_id")
-
-        if not user_id:
-            print("⚠️ user_id отсутствует в metadata!")
-            return web.Response(status=200)
-
-        user_id = str(user_id)  # гарантируем строковый формат
-
-        if user_id not in subscriptions:
-            subscriptions[user_id] = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-            save_subscriptions(subscriptions)
-            print(f"✅ Подписка добавлена для {user_id}")
-
-            try:
-                invite = await bot.create_chat_invite_link(
-                    chat_id=CHANNEL_ID,
-                    expire_date=int((datetime.now() + timedelta(days=1)).timestamp()),
-                    member_limit=1
-                )
-                keyboard = InlineKeyboardMarkup().add(
-                    InlineKeyboardButton("🔗 Dołącz do kanału", url=invite.invite_link)
-                )
-                await bot.send_message(int(user_id),
-                    "✅ Płatność potwierdzona! Kliknij poniżej, aby dołączyć do kanału:",
-                    reply_markup=keyboard)
-            except Exception as e:
-                print(f"❌ Ошибка отправки ссылки пользователю {user_id}: {e}")
-                await bot.send_message(ADMIN_ID, f"❌ Błąd zaproszenia: {e}")
+                try:
+                    invite = await bot.create_chat_invite_link(
+                        chat_id=CHANNEL_ID,
+                        expire_date=int((datetime.now() + timedelta(days=1)).timestamp()),
+                        member_limit=1
+                    )
+                    kb = InlineKeyboardMarkup(
+                        inline_keyboard=[[InlineKeyboardButton(text="🔗 Dołącz do kanału", url=invite.invite_link)]]
+                    )
+                    await bot.send_message(user_id, "✅ Płatność potwierdzona! Kliknij, aby dołączyć do kanału:", reply_markup=kb)
+                except Exception as e:
+                    await bot.send_message(ADMIN_ID, f"❌ Błąd zaproszenia: {e}")
 
     return web.Response(status=200)
 
-# === Проверка истекших подписок ===
+# === Задача: автоудаление по истечению подписки ===
 async def check_expired():
     while True:
         now = datetime.now().date()
@@ -148,40 +137,31 @@ async def check_expired():
         for user_id, end in subscriptions.items():
             try:
                 if datetime.strptime(end, "%Y-%m-%d").date() <= now:
-                    await bot.kick_chat_member(CHANNEL_ID, int(user_id))
-                    await asyncio.sleep(1)
+                    await bot.ban_chat_member(CHANNEL_ID, int(user_id))
                     await bot.unban_chat_member(CHANNEL_ID, int(user_id))
                     expired.append(user_id)
             except Exception as e:
-                await bot.send_message(ADMIN_ID, f"❗Błąd usuwania {user_id}: {e}")
+                await bot.send_message(ADMIN_ID, f"❗ Błąd usuwania {user_id}: {e}")
 
         for user_id in expired:
             subscriptions.pop(user_id)
         save_subscriptions(subscriptions)
-
         await asyncio.sleep(86400)
 
-# === Стартовые события ===
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-
-async def on_startup(app):
+# === Webhook startup/shutdown ===
+async def on_startup(bot: Bot):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(check_expired())
 
-async def on_shutdown(app):
+async def on_shutdown(bot: Bot):
     await bot.delete_webhook()
 
+# === Запуск приложения ===
+app = web.Application()
+app.router.add_post("/stripe_webhook", stripe_webhook)
+
+SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+setup_application(app, dp, bot=bot, on_startup=on_startup, on_shutdown=on_shutdown)
+
 if __name__ == "__main__":
-    app = web.Application()
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
-
-    # Stripe Webhook
-    app.router.add_post("/stripe_webhook", stripe_webhook)
-
-    # Telegram Webhook
-    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
-
-    # Запуск aiohttp сервера
     web.run_app(app, host=WEBAPP_HOST, port=WEBAPP_PORT)
-
