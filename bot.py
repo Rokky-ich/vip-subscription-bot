@@ -29,6 +29,7 @@ dp = Dispatcher(bot)
 
 # === Файл базы данных ===
 DB_FILE = "/data/subscriptions.json"
+pending_requests = {}
 
 def load_subscriptions():
     if os.path.exists(DB_FILE):
@@ -87,7 +88,7 @@ async def cmd_verify(message: types.Message):
             )
             await message.answer("✅ Twoja subskrypcja została potwierdzona!", reply_markup=keyboard)
         except Exception as e:
-            await message.answer(f"Błąd: {e}")
+            await message.answer(f"❌ Błąd: {e}")
     else:
         await message.answer("❌ Nie znaleziono aktywnej subskrypcji.")
 
@@ -104,11 +105,21 @@ async def stripe_webhook(request):
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-        user_id = session["metadata"]["user_id"]
+        print("✅ Получена сессия Stripe:", session)  # логируем весь объект
+
+        metadata = session.get("metadata", {})
+        user_id = metadata.get("user_id")
+
+        if not user_id:
+            print("⚠️ user_id отсутствует в metadata!")
+            return web.Response(status=200)
+
+        user_id = str(user_id)  # гарантируем строковый формат
 
         if user_id not in subscriptions:
             subscriptions[user_id] = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
             save_subscriptions(subscriptions)
+            print(f"✅ Подписка добавлена для {user_id}")
 
             try:
                 invite = await bot.create_chat_invite_link(
@@ -123,6 +134,7 @@ async def stripe_webhook(request):
                     "✅ Płatność potwierdzona! Kliknij poniżej, aby dołączyć do kanału:",
                     reply_markup=keyboard)
             except Exception as e:
+                print(f"❌ Ошибка отправки ссылки пользователю {user_id}: {e}")
                 await bot.send_message(ADMIN_ID, f"❌ Błąd zaproszenia: {e}")
 
     return web.Response(status=200)
@@ -150,28 +162,26 @@ async def check_expired():
         await asyncio.sleep(86400)
 
 # === Стартовые события ===
-async def on_startup(dp):
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+
+async def on_startup(app):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(check_expired())
 
-    app = web.Application()
-    app.router.add_post("/stripe_webhook", stripe_webhook)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, WEBAPP_HOST, 8001)
-    await site.start()
-
-async def on_shutdown(dp):
+async def on_shutdown(app):
     await bot.delete_webhook()
 
-# === Запуск бота ===
 if __name__ == "__main__":
-    start_webhook(
-        dispatcher=dp,
-        webhook_path=WEBHOOK_PATH,
-        on_startup=on_startup,
-        on_shutdown=on_shutdown,
-        skip_updates=True,
-        host=WEBAPP_HOST,
-        port=WEBAPP_PORT,
-    )
+    app = web.Application()
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
+    # Stripe Webhook
+    app.router.add_post("/stripe_webhook", stripe_webhook)
+
+    # Telegram Webhook
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+
+    # Запуск aiohttp сервера
+    web.run_app(app, host=WEBAPP_HOST, port=WEBAPP_PORT)
+
