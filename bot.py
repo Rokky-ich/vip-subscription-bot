@@ -5,14 +5,14 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.utils.executor import start_webhook
 from aiohttp import web
 
-# Настройки
+# --- НАСТРОЙКИ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 CHANNEL_LINK = os.getenv("CHANNEL_LINK")
 
 stripe.api_key = STRIPE_SECRET_KEY
 
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # например https://yourapp.onrender.com
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -47,7 +47,7 @@ async def send_welcome(message: types.Message):
             mode='payment',
             success_url=f'{WEBHOOK_HOST}/success.html',
             cancel_url=f'{WEBHOOK_HOST}/cancel.html',
-            metadata={"user_id": user_id}
+            client_reference_id=user_id,  # 👈 ОБЯЗАТЕЛЬНО
         )
         await message.answer("Aby uzyskać dostęp do kanału VIP, dokonaj płatności:")
         await message.answer(session.url)
@@ -78,12 +78,13 @@ async def handle_stripe_webhook(request):
 
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
-        user_id = session['metadata']['user_id']
-        subscriptions.add(user_id)
-        try:
-            await bot.send_message(user_id, f"✅ Płatność potwierdzona!\nLink do kanału: {CHANNEL_LINK}")
-        except:
-            pass
+        user_id = session.get('client_reference_id')  # 👈 ЗДЕСЬ ИЩЕМ user_id
+        if user_id:
+            subscriptions.add(user_id)
+            try:
+                await bot.send_message(user_id, f"✅ Płatność potwierdzona!\nLink do kanału: {CHANNEL_LINK}")
+            except Exception as e:
+                print(f"Ошибка отправки сообщения: {e}")
 
     return web.Response(status=200)
 
