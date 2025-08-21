@@ -4,15 +4,15 @@ import asyncio
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ParseMode
-from aiogram.utils.executor import start_webhook
-from aiohttp import web
+from aiogram.dispatcher.webhook import get_new_configured_app
 import stripe
+from aiohttp import web
 
 # ====== CONFIG ======
 API_TOKEN = os.getenv("API_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # must start with https
-WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
+WEBHOOK_PATH = f"/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 8000))
@@ -127,7 +127,7 @@ async def check_expired():
         await asyncio.sleep(86400)
         notified.clear()
 
-# ====== START ======
+# ====== STARTUP & WEBHOOK ======
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(check_expired())
@@ -136,12 +136,7 @@ async def on_shutdown(dp):
     await bot.delete_webhook()
 
 if __name__ == '__main__':
-    app = web.Application()
-    app.router.add_post(WEBHOOK_PATH, stripe_webhook)
-    start_webhook(
-    dp,
-    webhook_path=WEBHOOK_PATH,
-    skip_updates=True,
-    on_startup=on_startup,
-    on_shutdown=on_shutdown
-)
+    app = get_new_configured_app(dispatcher=dp, path=WEBHOOK_PATH)
+    app.router.add_post("/stripe", stripe_webhook)
+
+    web.run_app(app, host=WEBAPP_HOST, port=WEBAPP_PORT)
