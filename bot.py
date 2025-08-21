@@ -40,7 +40,7 @@ async def send_welcome(message: types.Message):
                     'product_data': {
                         'name': 'VIP Subskrypcja',
                     },
-                    'unit_amount': 20000,  # 200 PLN
+                    'unit_amount': 20000,  # 5 PLN
                 },
                 'quantity': 1,
             }],
