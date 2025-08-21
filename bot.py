@@ -139,7 +139,7 @@ if __name__ == '__main__':
     app = web.Application()
     app.router.add_post(WEBHOOK_PATH, stripe_webhook)
     start_webhook(
-    dispatcher,
+    dp,
     webhook_path=WEBHOOK_PATH,
     skip_updates=True,
     on_startup=on_startup,
