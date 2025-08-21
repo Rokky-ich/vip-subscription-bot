@@ -1,18 +1,18 @@
 import os
-import time
 import stripe
+import time
+import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils.executor import start_webhook
 from aiohttp import web
-import asyncio
 
-# Настройки
+# --- Настройки окружения ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
-CHANNEL_ID = os.getenv("CHANNEL_ID")  # Например: '@vip_channel' или '-1001234567890'
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # Пример: https://yourapp.onrender.com
+CHANNEL_ID = os.getenv("CHANNEL_ID")  # Пример: -1001234567890 или @your_channel
 
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # например https://yourapp.onrender.com
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -24,17 +24,16 @@ stripe.api_key = STRIPE_SECRET_KEY
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
+# Простое хранилище (лучше заменить на БД)
 subscriptions = set()
 
+# --- Обработчик /start ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     user_id = str(message.from_user.id)
+
     if user_id in subscriptions:
-        try:
-            invite = await bot.create_chat_invite_link(chat_id=CHANNEL_ID, member_limit=1, expire_date=int(time.time()) + 86400)
-            await message.answer(f"✅ Już masz aktywną subskrypcję!\nLink: {invite.invite_link}")
-        except Exception as e:
-            await message.answer("❌ Nie udało się wygenerować linku. Skontaktuj się z administratorem.")
+        await message.answer("✅ Już masz aktywną subskrypcję!")
         return
 
     session = stripe.checkout.Session.create(
@@ -48,27 +47,29 @@ async def start_cmd(message: types.Message):
             'quantity': 1
         }],
         mode='payment',
-        success_url='https://t.me/your_channel_link',  # временно, Stripe требует URL
-        cancel_url='https://t.me/your_channel_link',
+        success_url=f"{WEBHOOK_HOST}/success.html",  # НЕ ссылка на канал!
+        cancel_url=f"{WEBHOOK_HOST}/cancel.html",
         metadata={'user_id': user_id}
     )
 
     await message.answer("Aby uzyskać dostęp do kanału VIP, dokonaj płatności:")
     await message.answer(session.url)
 
+# --- Обработчик /verify ---
 @dp.message_handler(commands=['verify'])
 async def verify_cmd(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id in subscriptions:
-        try:
-            invite = await bot.create_chat_invite_link(chat_id=CHANNEL_ID, member_limit=1, expire_date=int(time.time()) + 86400)
-            await message.answer(f"✅ Płatność potwierdzona!\nLink do kanału:\n{invite.invite_link}")
-        except Exception as e:
-            await message.answer("❌ Nie udało się wygenerować linku.")
+        invite = await bot.create_chat_invite_link(
+            chat_id=CHANNEL_ID,
+            expire_date=int(time.time()) + 86400,  # 24 часа
+            member_limit=1
+        )
+        await message.answer(f"✅ Subskrypcja aktywna!\nOto Twój jednorazowy link:\n{invite.invite_link}")
     else:
         await message.answer("❌ Nie znaleziono płatności.")
 
-# Stripe webhook
+# --- Stripe Webhook ---
 async def handle_stripe_webhook(request):
     payload = await request.read()
     sig_header = request.headers.get("stripe-signature")
@@ -76,22 +77,27 @@ async def handle_stripe_webhook(request):
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception as e:
-        print("Webhook error:", str(e))
+        print("Stripe webhook error:", e)
         return web.Response(status=400)
 
-    if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
-        user_id = session['metadata']['user_id']
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        user_id = session["metadata"]["user_id"]
         subscriptions.add(user_id)
+
         try:
-            invite = await bot.create_chat_invite_link(chat_id=CHANNEL_ID, member_limit=1, expire_date=int(time.time()) + 86400)
+            invite = await bot.create_chat_invite_link(
+                chat_id=CHANNEL_ID,
+                expire_date=int(time.time()) + 86400,  # ссылка живёт 24ч
+                member_limit=1
+            )
             await bot.send_message(user_id, f"✅ Płatność potwierdzona!\nOto Twój jednorazowy link:\n{invite.invite_link}")
         except Exception as e:
-            print("Send error:", e)
+            print("Telegram send error:", e)
 
     return web.Response(status=200)
 
-# Stripe вебсервер
+# --- Сервер для Stripe webhook ---
 async def stripe_webhook_runner():
     app = web.Application()
     app.router.add_post("/stripe_webhook", handle_stripe_webhook)
@@ -100,7 +106,7 @@ async def stripe_webhook_runner():
     site = web.TCPSite(runner, "0.0.0.0", 8001)
     await site.start()
 
-# Старт и остановка бота
+# --- Старт и остановка ---
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(stripe_webhook_runner())
@@ -108,8 +114,8 @@ async def on_startup(dp):
 async def on_shutdown(dp):
     await bot.delete_webhook()
 
-# Запуск
-if __name__ == '__main__':
+# --- Запуск ---
+if __name__ == "__main__":
     start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
@@ -117,5 +123,5 @@ if __name__ == '__main__':
         on_shutdown=on_shutdown,
         skip_updates=True,
         host=WEBAPP_HOST,
-        port=WEBAPP_PORT,
+        port=WEBAPP_PORT
     )
