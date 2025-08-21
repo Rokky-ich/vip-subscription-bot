@@ -127,6 +127,8 @@ async def check_expired():
         await asyncio.sleep(86400)
         notified.clear()
 
+from aiogram.utils.executor import start_webhook
+
 # ====== STARTUP & WEBHOOK ======
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
@@ -136,7 +138,16 @@ async def on_shutdown(dp):
     await bot.delete_webhook()
 
 if __name__ == '__main__':
-    app = get_new_configured_app(dispatcher=dp, path=WEBHOOK_PATH)
+    app = web.Application()
     app.router.add_post("/stripe", stripe_webhook)
 
-    web.run_app(app, host=WEBAPP_HOST, port=WEBAPP_PORT)
+    start_webhook(
+        dispatcher=dp,
+        webhook_path=WEBHOOK_PATH,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        skip_updates=True,
+        host=WEBAPP_HOST,
+        port=WEBAPP_PORT,
+        web_app=app
+    )
