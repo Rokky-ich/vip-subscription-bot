@@ -44,8 +44,12 @@ subscriptions = load_subscriptions()
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 
+from aiogram import Router
+
+router = Router()
+
 # === Команда /start ===
-@dp.message(F.text == "/start")
+@router.message(F.text == "/start")
 async def start(message: types.Message):
     user_id = str(message.from_user.id)
 
@@ -73,7 +77,7 @@ async def start(message: types.Message):
     await message.answer(session.url)
 
 # === Команда /verify ===
-@dp.message(F.text == "/verify")
+@router.message(F.text == "/verify")
 async def verify(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id not in subscriptions:
@@ -159,6 +163,8 @@ async def on_shutdown(bot: Bot):
 # === Запуск приложения ===
 app = web.Application()
 app.router.add_post("/stripe_webhook", stripe_webhook)
+
+dp.include_router(router)
 
 SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
 setup_application(app, dp, bot=bot, on_startup=on_startup, on_shutdown=on_shutdown)
