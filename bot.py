@@ -11,6 +11,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram.client.default import DefaultBotProperties
 from aiogram import Router
+from aiogram.filters import Command
 
 # === Конфигурация окружения ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -43,12 +44,13 @@ subscriptions = load_subscriptions()
 
 # === Инициализация бота и диспетчера ===
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-router = Router()
 dp = Dispatcher(storage=MemoryStorage())
+
+router = Router()
 dp.include_router(router)
 
 # === Команда /start ===
-@router.message(F.text == "/start")
+@router.message(Command("start"))
 async def start(message: types.Message):
     user_id = str(message.from_user.id)
 
@@ -76,7 +78,7 @@ async def start(message: types.Message):
     await message.answer(session.url)
 
 # === Команда /verify ===
-@router.message(F.text == "/verify")
+@router.message(Command("verify"))
 async def verify(message: types.Message):
     user_id = str(message.from_user.id)
     if user_id not in subscriptions:
