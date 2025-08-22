@@ -13,7 +13,6 @@ from aiogram import Router
 # === Конфигурация окружения ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
@@ -111,8 +110,10 @@ async def check_expired():
 # === Запуск через polling ===
 async def main():
     asyncio.create_task(check_expired())
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    except Exception as e:
+        print(f"Polling error: {e}")
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
