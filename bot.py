@@ -150,20 +150,14 @@ async def on_shutdown(dp):
     await bot.delete_webhook()
 
 if __name__ == '__main__':
-    from aiohttp import web
+    from aiogram import executor
+    start_webhook(
+        dispatcher=dp,
+        webhook_path=WEBHOOK_PATH,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        skip_updates=True,
+        host=WEBAPP_HOST,
+        port=WEBAPP_PORT,
+    )
 
-    app = web.Application()
-    dp.setup(app)
-
-    app.router.add_post(WEBHOOK_PATH, dp.webhook_handler())
-    app.router.add_get("/", lambda request: web.Response(text="Bot is online"))
-
-    async def start_bot():
-        await on_startup(dp)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, WEBAPP_HOST, WEBAPP_PORT)
-        await site.start()
-        print("Bot running...")
-
-    asyncio.run(start_bot())
