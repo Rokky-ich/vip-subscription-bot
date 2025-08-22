@@ -9,7 +9,7 @@ import os
 API_TOKEN = os.getenv("API_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Должен начинаться с -100
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
-ADMIN_ID = 8413556665
+ADMIN_ID = 1279721354
 
 WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
