@@ -75,10 +75,10 @@ async def debug_all_callbacks(callback: CallbackQuery):
     print(f"🔄 Получен callback: {callback.data}")
     await callback.answer("Callback получен (все ок)")
 
-@dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
-async def handle_admin_action(callback: CallbackQuery):
-    action, user_id = callback.data.split(":")
-    username = pending_requests.get(user_id, "nieznany")
+@dp.callback_query_handler(lambda c: not (c.data.startswith("approve:") or c.data.startswith("deny:")))
+async def debug_all_callbacks(callback: CallbackQuery):
+    print(f"🔄 Callback не связанный с одобрением: {callback.data}")
+    await callback.answer("Callback получен (debug)")
 
     if action == "approve":
         end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
