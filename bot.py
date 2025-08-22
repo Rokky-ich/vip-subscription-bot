@@ -9,12 +9,12 @@ import os
 API_TOKEN = os.getenv("API_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Должен начинаться с -100
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
-ADMIN_ID = 1279721354
+ADMIN_ID = 8413556665
 
 WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_HOST = "0.0.0.0"
-WEBAPP_PORT = int(os.environ.get("PORT"))
+WEBAPP_PORT = int(os.getenv("PORT", default=8000))
 
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
@@ -65,24 +65,22 @@ async def start_handler(message: types.Message):
 
     await bot.send_message(
         ADMIN_ID,
-        f"🔔 Запрос от пользователя:
-👤 @{username}
-🆔 <code>{user_id}</code>",
+        f"🔔 Запрос от пользователя:\n👤 @{username}\n🆔 <code>{user_id}</code>",
         parse_mode="HTML",
         reply_markup=keyboard
     )
 
 @dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
 async def handle_admin_action(callback: CallbackQuery):
-    try:
-        action, user_id = callback.data.split(":")
-        username = pending_requests.get(user_id, "nieznany")
+    action, user_id = callback.data.split(":")
+    username = pending_requests.get(user_id, "nieznany")
 
-        if action == "approve":
-            end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-            subscriptions[user_id] = end_date
-            save_subscriptions(subscriptions)
+    if action == "approve":
+        end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+        subscriptions[user_id] = end_date
+        save_subscriptions(subscriptions)
 
+        try:
             invite = await bot.create_chat_invite_link(
                 chat_id=CHANNEL_ID,
                 expire_date=int((datetime.now() + timedelta(days=1)).timestamp()),
@@ -97,16 +95,15 @@ async def handle_admin_action(callback: CallbackQuery):
                                    reply_markup=keyboard)
             await bot.send_message(ADMIN_ID,
                                    f"✅ @{username} (ID: {user_id}) został zatwierdzony do {end_date}.")
-        else:
-            await bot.send_message(int(user_id), "❌ Dostęp odrzucony.")
-            await bot.send_message(ADMIN_ID, f"🚫 @{username} (ID: {user_id}) został odrzucony.")
+        except Exception as e:
+            await bot.send_message(ADMIN_ID, f"❗ Błąd przy tworzeniu linku dla {user_id}:\n<code>{e}</code>",
+                                   parse_mode="HTML")
+    else:
+        await bot.send_message(int(user_id), "❌ Dostęp odrzucony.")
+        await bot.send_message(ADMIN_ID, f"🚫 @{username} (ID: {user_id}) został odrzucony.")
 
-        pending_requests.pop(user_id, None)
-        await callback.answer()
-    except Exception as e:
-        await bot.send_message(ADMIN_ID, f"❗ Ошибка обработки кнопки:
-<code>{e}</code>", parse_mode="HTML")
-        await callback.answer("⚠️ Ошибка при обработке")
+    pending_requests.pop(user_id, None)
+    await callback.answer()
 
 async def check_expired():
     already_notified = set()
@@ -132,8 +129,7 @@ async def check_expired():
             except Exception as e:
                 print(f"Błąd przy sprawdzaniu {user_id}: {e}")
                 await bot.send_message(ADMIN_ID,
-                                       f"⚠️ Błąd przy usuwaniu {user_id}:
-<code>{e}</code>",
+                                       f"⚠️ Błąd przy usuwaniu {user_id}:\n<code>{e}</code>",
                                        parse_mode="HTML")
 
         for user_id in to_remove:
@@ -144,10 +140,7 @@ async def check_expired():
         already_notified.clear()
 
 async def on_startup(dp):
-    await bot.set_webhook(
-        WEBHOOK_URL,
-        allowed_updates=["message", "callback_query"]
-    )
+    await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(check_expired())
 
 async def on_shutdown(dp):
