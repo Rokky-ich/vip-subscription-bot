@@ -69,6 +69,11 @@ async def start_handler(message: types.Message):
         parse_mode="HTML",
         reply_markup=keyboard
     )
+    
+@dp.callback_query_handler()
+async def debug_all_callbacks(callback: CallbackQuery):
+    print(f"🔄 Получен callback: {callback.data}")
+    await callback.answer("Callback получен (все ок)")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
 async def handle_admin_action(callback: CallbackQuery):
