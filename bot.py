@@ -7,7 +7,7 @@ import json
 import os
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Должен начинаться с -100
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 ADMIN_ID = 1279721354
 
@@ -59,23 +59,23 @@ async def start_handler(message: types.Message):
     await message.answer("⏳ Twoja prośba została wysłana do administratora. Proszę czekać na zatwierdzenie.")
 
     keyboard = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("✅ Одобрить", callback_data=f"apv_{user_id}"),
-        InlineKeyboardButton("❌ Отклонить", callback_data=f"deny_{user_id}")
+        InlineKeyboardButton("✅ Одобрить", callback_data=f"approve:{user_id}"),
+        InlineKeyboardButton("❌ Отклонить", callback_data=f"deny:{user_id}")
     )
 
     await bot.send_message(
         ADMIN_ID,
         f"🔔 Запрос от пользователя:\n👤 @{username}\n🆔 <code>{user_id}</code>",
+        parse_mode="HTML",
         reply_markup=keyboard
     )
 
-@dp.callback_query_handler(lambda c: c.data and (c.data.startswith("apv_") or c.data.startswith("deny_")))
+@dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
 async def handle_admin_action(callback: CallbackQuery):
-    data = callback.data
-    action, user_id = data.split("_", 1)
+    action, user_id = callback.data.split(":")
     username = pending_requests.get(user_id, "nieznany")
 
-    if action == "apv":
+    if action == "approve":
         end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         subscriptions[user_id] = end_date
         save_subscriptions(subscriptions)
