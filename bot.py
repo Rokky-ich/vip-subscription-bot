@@ -39,7 +39,7 @@ subscriptions = load_subscriptions()
 @dp.message_handler(lambda message: message.text.lower() in ["start", "/start", "🚀 start"])
 async def cmd_start(message: types.Message):
     keyboard = InlineKeyboardMarkup(row_width=1).add(
-        InlineKeyboardButton("📞 Kontakt z administratorem", url="https://t.me/Alex_reng"),
+        InlineKeyboardButton("📞 Kontakt z administratorem", url="https://t.me/wawaadmin"),
         InlineKeyboardButton("💳 Link do płatności", url="https://buy.stripe.com/dRm14f633b0HagO74Rds403"),
         InlineKeyboardButton("✅ Zapłaciłem", callback_data="paid")
     )
