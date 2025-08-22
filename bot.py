@@ -26,7 +26,7 @@ WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 8000))
 
-DB_FILE = "/data/subscriptions.json"
+DB_FILE = "subscriptions.json"
 stripe.api_key = STRIPE_SECRET_KEY
 
 # === База подписок ===
@@ -45,7 +45,6 @@ subscriptions = load_subscriptions()
 # === Инициализация бота и диспетчера ===
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
-
 router = Router()
 dp.include_router(router)
 
