@@ -69,7 +69,7 @@ async def start_handler(message: types.Message):
         parse_mode="HTML",
         reply_markup=keyboard
     )
-    
+
 @dp.callback_query_handler()
 async def debug_all_callbacks(callback: CallbackQuery):
     print(f"🔄 Получен callback: {callback.data}")
@@ -145,8 +145,12 @@ async def check_expired():
         already_notified.clear()
 
 async def on_startup(dp):
-    await bot.set_webhook(WEBHOOK_URL)
+    await bot.set_webhook(
+        WEBHOOK_URL,
+        allowed_updates=["message", "callback_query"]  # <== обязательно!
+    )
     asyncio.create_task(check_expired())
+
 
 async def on_shutdown(dp):
     await bot.delete_webhook()
