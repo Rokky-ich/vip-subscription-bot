@@ -7,7 +7,7 @@ import json
 import os
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Должен начинаться с -100
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 ADMIN_ID = 1279721354
 
@@ -59,29 +59,23 @@ async def start_handler(message: types.Message):
     await message.answer("⏳ Twoja prośba została wysłana do administratora. Proszę czekać na zatwierdzenie.")
 
     keyboard = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("✅ Одобрить", callback_data=f"approve:{user_id}"),
-        InlineKeyboardButton("❌ Отклонить", callback_data=f"deny:{user_id}")
+        InlineKeyboardButton("✅ Одобрить", callback_data=f"apv_{user_id}"),
+        InlineKeyboardButton("❌ Отклонить", callback_data=f"deny_{user_id}")
     )
 
     await bot.send_message(
         ADMIN_ID,
         f"🔔 Запрос от пользователя:\n👤 @{username}\n🆔 <code>{user_id}</code>",
-        parse_mode="HTML",
         reply_markup=keyboard
     )
 
-@dp.callback_query_handler(lambda call: True)
+@dp.callback_query_handler(lambda c: c.data and (c.data.startswith("apv_") or c.data.startswith("deny_")))
 async def handle_admin_action(callback: CallbackQuery):
-    print(f"Callback received: {callback.data}")  # лог
-
-    if not callback.data.startswith(("approve:", "deny:")):
-        await callback.answer()
-        return
-
-    action, user_id = callback.data.split(":")
+    data = callback.data
+    action, user_id = data.split("_", 1)
     username = pending_requests.get(user_id, "nieznany")
 
-    if action == "approve":
+    if action == "apv":
         end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         subscriptions[user_id] = end_date
         save_subscriptions(subscriptions)
@@ -102,7 +96,7 @@ async def handle_admin_action(callback: CallbackQuery):
             await bot.send_message(ADMIN_ID,
                                    f"✅ @{username} (ID: {user_id}) został zatwierdzony do {end_date}.")
         except Exception as e:
-            await bot.send_message(ADMIN_ID, f"❗ Błąd przy tworzeniu linku для {user_id}:\n<code>{e}</code>",
+            await bot.send_message(ADMIN_ID, f"❗ Błąd przy tworzeniu linku dla {user_id}:\n<code>{e}</code>",
                                    parse_mode="HTML")
     else:
         await bot.send_message(int(user_id), "❌ Dostęp odrzucony.")
@@ -110,7 +104,6 @@ async def handle_admin_action(callback: CallbackQuery):
 
     pending_requests.pop(user_id, None)
     await callback.answer()
-
 
 async def check_expired():
     already_notified = set()
