@@ -70,8 +70,14 @@ async def start_handler(message: types.Message):
         reply_markup=keyboard
     )
 
-@dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
+@dp.callback_query_handler(lambda call: True)
 async def handle_admin_action(callback: CallbackQuery):
+    print(f"Callback received: {callback.data}")  # лог
+
+    if not callback.data.startswith(("approve:", "deny:")):
+        await callback.answer()
+        return
+
     action, user_id = callback.data.split(":")
     username = pending_requests.get(user_id, "nieznany")
 
@@ -96,7 +102,7 @@ async def handle_admin_action(callback: CallbackQuery):
             await bot.send_message(ADMIN_ID,
                                    f"✅ @{username} (ID: {user_id}) został zatwierdzony do {end_date}.")
         except Exception as e:
-            await bot.send_message(ADMIN_ID, f"❗ Błąd przy tworzeniu linku dla {user_id}:\n<code>{e}</code>",
+            await bot.send_message(ADMIN_ID, f"❗ Błąd przy tworzeniu linku для {user_id}:\n<code>{e}</code>",
                                    parse_mode="HTML")
     else:
         await bot.send_message(int(user_id), "❌ Dostęp odrzucony.")
@@ -104,6 +110,7 @@ async def handle_admin_action(callback: CallbackQuery):
 
     pending_requests.pop(user_id, None)
     await callback.answer()
+
 
 async def check_expired():
     already_notified = set()
