@@ -43,8 +43,8 @@ subscriptions = load_subscriptions()
 
 # === Инициализация бота и диспетчера ===
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=MemoryStorage())
 router = Router()
+dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(router)
 
 # === Команда /start ===
