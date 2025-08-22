@@ -147,12 +147,18 @@ async def on_shutdown(dp):
     await bot.delete_webhook()
 
 if __name__ == '__main__':
-    start_webhook(
+    from aiogram import executor
+    import os
+
+    WEBHOOK_HOST = 'https://vip-subscription-bot-fr92.onrender.com'
+    WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
+    WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
+    executor.start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
         on_startup=on_startup,
-        on_shutdown=on_shutdown,
         skip_updates=True,
-        host=WEBAPP_HOST,
-        port=WEBAPP_PORT,
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8000)),
     )
