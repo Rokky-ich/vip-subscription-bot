@@ -7,9 +7,9 @@ import json
 import os
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Должен начинаться с -100
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Пример: -1001234567890
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
-ADMIN_ID = 1279721354
+ADMIN_ID = 1279721354  # Замени на своего админа
 
 WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
@@ -34,46 +34,38 @@ def save_subscriptions(data):
 
 subscriptions = load_subscriptions()
 
-def get_start_keyboard():
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add(types.KeyboardButton("🚀 Start"))
-    return keyboard
-
-@dp.message_handler(commands=['start'])
-async def start_command(message: types.Message):
-    await message.answer(
-        "👋 Witaj! Kliknij przycisk poniżej, aby rozpocząć.",
-        reply_markup=get_start_keyboard()
+@dp.message_handler(commands=["start"])
+async def cmd_start(message: types.Message):
+    keyboard = InlineKeyboardMarkup(row_width=1).add(
+        InlineKeyboardButton("📞 Связь с администратором", url="https://t.me/YOUR_ADMIN_USERNAME"),
+        InlineKeyboardButton("💳 Ссылка для оплаты", url="https://example.com/pay"),
+        InlineKeyboardButton("✅ Я оплатил", callback_data="paid")
     )
+    await message.answer("👋 Добро пожаловать! Выберите действие ниже:", reply_markup=keyboard)
 
-@dp.message_handler(lambda message: message.text == "🚀 Start")
-async def start_handler(message: types.Message):
-    user_id = str(message.from_user.id)
-    username = message.from_user.username or "bez username"
-
-    if user_id in subscriptions:
-        await message.answer("✅ Masz już aktywny dostęp.")
-        return
-
+@dp.callback_query_handler(lambda c: c.data == "paid")
+async def handle_paid(callback: CallbackQuery):
+    user_id = str(callback.from_user.id)
+    username = callback.from_user.username or "без username"
     pending_requests[user_id] = username
-    await message.answer("⏳ Twoja prośba została wysłana do administratora. Proszę czekać na zatwierdzenie.")
 
-    keyboard = InlineKeyboardMarkup().add(
+    admin_keyboard = InlineKeyboardMarkup().add(
         InlineKeyboardButton("✅ Одобрить", callback_data=f"approve:{user_id}"),
         InlineKeyboardButton("❌ Отклонить", callback_data=f"deny:{user_id}")
     )
 
     await bot.send_message(
         ADMIN_ID,
-        f"🔔 Запрос от пользователя:\n👤 @{username}\n🆔 <code>{user_id}</code>",
-        parse_mode="HTML",
-        reply_markup=keyboard
+        f"🔔 Запрос на доступ от @{username}\nID: <code>{user_id}</code>",
+        reply_markup=admin_keyboard,
+        parse_mode="HTML"
     )
+    await callback.answer("Запрос отправлен админу. Ожидайте.")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
 async def handle_admin_action(callback: CallbackQuery):
     action, user_id = callback.data.split(":")
-    username = pending_requests.get(user_id, "nieznany")
+    username = pending_requests.get(user_id, "неизвестен")
 
     if action == "approve":
         end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
@@ -86,25 +78,28 @@ async def handle_admin_action(callback: CallbackQuery):
                 expire_date=int((datetime.now() + timedelta(days=1)).timestamp()),
                 member_limit=1
             )
-            keyboard = InlineKeyboardMarkup().add(
-                InlineKeyboardButton("🔗 Dołącz do kanału", url=invite.invite_link)
-            )
 
             await bot.send_message(int(user_id),
-                                   "✅ Dostęp zatwierdzony! Kliknij przycisk poniżej, aby dołączyć do kanału:",
-                                   reply_markup=keyboard)
+                "✅ Ваш доступ подтверждён. Нажмите кнопку ниже, чтобы войти:",
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton("🔗 Перейти в канал", url=invite.invite_link)
+                )
+            )
+
             await bot.send_message(ADMIN_ID,
-                                   f"✅ @{username} (ID: {user_id}) został zatwierdzony do {end_date}.")
+                f"✅ @{username} (ID: {user_id}) добавлен до {end_date}.")
+
         except Exception as e:
-            await bot.send_message(ADMIN_ID, f"❗ Błąd przy tworzeniu linku dla {user_id}:\n<code>{e}</code>",
-                                   parse_mode="HTML")
+            await bot.send_message(ADMIN_ID, f"❗ Ошибка при создании ссылки: <code>{e}</code>", parse_mode="HTML")
+
     else:
-        await bot.send_message(int(user_id), "❌ Dostęp odrzucony.")
-        await bot.send_message(ADMIN_ID, f"🚫 @{username} (ID: {user_id}) został odrzucony.")
+        await bot.send_message(int(user_id), "❌ Доступ отклонён.")
+        await bot.send_message(ADMIN_ID, f"🚫 @{username} (ID: {user_id}) — отклонён.")
 
     pending_requests.pop(user_id, None)
     await callback.answer()
 
+# Проверка истекших подписок
 async def check_expired():
     already_notified = set()
     while True:
@@ -116,21 +111,18 @@ async def check_expired():
                 end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
 
                 if end_date == now + timedelta(days=1) and user_id not in already_notified:
-                    await bot.send_message(int(user_id), "⏳ Twoja subskrypcja kończy się jutro!")
+                    await bot.send_message(int(user_id), "⏳ Ваша подписка заканчивается завтра!")
                     already_notified.add(user_id)
 
                 elif end_date <= now:
-                    await bot.send_message(int(user_id), "❌ Subskrypcja wygasła. Zostałeś usunięty z kanału.")
-                    await bot.kick_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))
+                    await bot.send_message(int(user_id), "❌ Срок подписки истёк. Вы удалены из канала.")
+                    await bot.kick_chat_member(CHANNEL_ID, int(user_id))
                     await asyncio.sleep(1)
-                    await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=int(user_id))
+                    await bot.unban_chat_member(CHANNEL_ID, int(user_id))
                     to_remove.append(user_id)
 
             except Exception as e:
-                print(f"Błąd przy sprawdzaniu {user_id}: {e}")
-                await bot.send_message(ADMIN_ID,
-                                       f"⚠️ Błąd przy usuwaniu {user_id}:\n<code>{e}</code>",
-                                       parse_mode="HTML")
+                await bot.send_message(ADMIN_ID, f"⚠️ Ошибка при удалении {user_id}:\n<code>{e}</code>", parse_mode="HTML")
 
         for user_id in to_remove:
             subscriptions.pop(user_id, None)
@@ -146,7 +138,7 @@ async def on_startup(dp):
 async def on_shutdown(dp):
     await bot.delete_webhook()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
