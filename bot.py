@@ -1,20 +1,18 @@
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.utils.executor import start_webhook
 from datetime import datetime, timedelta
 import asyncio
 import json
 import os
 
-from aiohttp import web
-
 API_TOKEN = os.getenv("API_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))  # Должен начинаться с -100
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # пример: https://your-app-name.onrender.com
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
+ADMIN_ID = 8413556665
+
 WEBHOOK_PATH = f"/webhook/{API_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
-
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", default=8000))
 
@@ -72,10 +70,9 @@ async def start_handler(message: types.Message):
         reply_markup=keyboard
     )
 
-@dp.callback_query_handler(lambda c: c.data and (c.data.startswith("approve:") or c.data.startswith("deny:")))
-async def process_callback(callback_query: types.CallbackQuery):
-    data = callback_query.data
-    action, user_id = data.split(":")
+@dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
+async def handle_admin_action(callback: CallbackQuery):
+    action, user_id = callback.data.split(":")
     username = pending_requests.get(user_id, "nieznany")
 
     if action == "approve":
@@ -94,19 +91,19 @@ async def process_callback(callback_query: types.CallbackQuery):
             )
 
             await bot.send_message(int(user_id),
-                "✅ Dostęp zatwierdzony! Kliknij przycisk poniżej, aby dołączyć do kanału:",
-                reply_markup=keyboard)
+                                   "✅ Dostęp zatwierdzony! Kliknij przycisk poniżej, aby dołączyć do kanału:",
+                                   reply_markup=keyboard)
             await bot.send_message(ADMIN_ID,
-                f"✅ @{username} (ID: {user_id}) został zatwierdzony do {end_date}.")
+                                   f"✅ @{username} (ID: {user_id}) został zatwierdzony do {end_date}.")
         except Exception as e:
             await bot.send_message(ADMIN_ID, f"❗ Błąd przy tworzeniu linku dla {user_id}:\n<code>{e}</code>",
-                parse_mode="HTML")
+                                   parse_mode="HTML")
     else:
         await bot.send_message(int(user_id), "❌ Dostęp odrzucony.")
         await bot.send_message(ADMIN_ID, f"🚫 @{username} (ID: {user_id}) został odrzucony.")
 
     pending_requests.pop(user_id, None)
-    await callback_query.answer()
+    await callback.answer()
 
 async def check_expired():
     already_notified = set()
@@ -150,7 +147,6 @@ async def on_shutdown(dp):
     await bot.delete_webhook()
 
 if __name__ == '__main__':
-    from aiogram import executor
     start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
@@ -160,4 +156,3 @@ if __name__ == '__main__':
         host=WEBAPP_HOST,
         port=WEBAPP_PORT,
     )
-

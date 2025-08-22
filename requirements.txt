@@ -1,3 +1,2 @@
 aiogram==2.25.1
-aiohttp
-stripe==9.8.0
+aiohttp==3.8.6
