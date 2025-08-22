@@ -10,6 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram.client.default import DefaultBotProperties
+from aiogram import Router
 
 # === Конфигурация окружения ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -43,10 +44,8 @@ subscriptions = load_subscriptions()
 # === Инициализация бота и диспетчера ===
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
-
-from aiogram import Router
-
 router = Router()
+dp.include_router(router)
 
 # === Команда /start ===
 @router.message(F.text == "/start")
@@ -163,8 +162,6 @@ async def on_shutdown(bot: Bot):
 # === Запуск приложения ===
 app = web.Application()
 app.router.add_post("/stripe_webhook", stripe_webhook)
-
-dp.include_router(router)
 
 SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
 setup_application(app, dp, bot=bot, on_startup=on_startup, on_shutdown=on_shutdown)
