@@ -4,9 +4,15 @@ import stripe
 import asyncio
 from aiohttp import web
 from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
+from aiogram.filters import Command
 
 # Конфигурация
 API_TOKEN = os.getenv("API_TOKEN")
@@ -24,7 +30,7 @@ WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", default=8000))
 
-bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=API_TOKEN, default=ParseMode.HTML)
 dp = Dispatcher()
 
 DB_FILE = "/data/subscriptions.json"
@@ -66,8 +72,8 @@ async def create_checkout_session(user_id: int):
         return None
 
 # ======= Команда /start ======= #
-@dp.message(commands=["start"])
-async def cmd_start(message: types.Message):
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
     keyboard = InlineKeyboardMarkup(row_width=1).add(
         InlineKeyboardButton("📞 Kontakt z administratorem", url="https://t.me/wawaadmin"),
         InlineKeyboardButton("💳 Link do płatności", callback_data="pay")
@@ -78,8 +84,8 @@ async def cmd_start(message: types.Message):
     )
 
 # ======= Обработка кнопки "Оплатить" ======= #
-@dp.callback_query(lambda c: c.data == "pay")
-async def handle_payment(callback: types.CallbackQuery):
+@dp.callback_query(F.data == "pay")
+async def handle_payment(callback: CallbackQuery):
     user_id = callback.from_user.id
     payment_url = await create_checkout_session(user_id)
 
@@ -132,8 +138,7 @@ async def stripe_webhook(request):
             except Exception as e:
                 await bot.send_message(
                     ADMIN_ID,
-                    f"⚠️ Błąd przy wysyłaniu linku użytkownikowi {user_id}:\n<code>{e}</code>",
-                    parse_mode="HTML"
+                    f"⚠️ Błąd przy wysyłaniu linku użytkownikowi {user_id}:\n<code>{e}</code>"
                 )
     return web.Response(status=200)
 
@@ -165,8 +170,7 @@ async def check_expired():
             except Exception as e:
                 await bot.send_message(
                     ADMIN_ID,
-                    f"⚠️ Błąd przy usuwaniu {user_id}:\n<code>{e}</code>",
-                    parse_mode="HTML"
+                    f"⚠️ Błąd przy usuwaniu {user_id}:\n<code>{e}</code>"
                 )
 
         for user_id in to_remove:
