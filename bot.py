@@ -1,12 +1,14 @@
-from aiogram import Bot, Dispatcher, types
-from aiogram.enums import ParseMode
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from datetime import datetime, timedelta
-from aiohttp import web
 import asyncio
 import json
 import os
+from datetime import datetime, timedelta
+
 import stripe
+from aiohttp import web
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 API_TOKEN = os.getenv("API_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
@@ -23,11 +25,12 @@ WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", default=8000))
 
-bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(bot)
+bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher()
 
 DB_FILE = "/data/subscriptions.json"
 
+# === Работа с локальной базой ===
 def load_subscriptions():
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r") as f:
@@ -40,7 +43,7 @@ def save_subscriptions(data):
 
 subscriptions = load_subscriptions()
 
-# Создание индивидуальной Stripe-сессии
+# === Stripe — создание индивидуальной сессии ===
 async def create_checkout_session(user_id: int):
     try:
         session = stripe.checkout.Session.create(
@@ -63,8 +66,8 @@ async def create_checkout_session(user_id: int):
         print(f"Stripe error: {e}")
         return None
 
-# Команда /start
-@dp.message_handler(commands=["start"])
+# === Команда /start ===
+@dp.message(F.text == "/start")
 async def cmd_start(message: types.Message):
     keyboard = InlineKeyboardMarkup(row_width=1).add(
         InlineKeyboardButton("📞 Kontakt z administratorem", url="https://t.me/wawaadmin"),
@@ -75,8 +78,8 @@ async def cmd_start(message: types.Message):
         reply_markup=keyboard
     )
 
-# Обработка нажатия кнопки "Оплатить"
-@dp.callback_query_handler(lambda c: c.data == "pay")
+# === Обработка кнопки "Оплатить" ===
+@dp.callback_query(F.data == "pay")
 async def handle_payment(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     payment_url = await create_checkout_session(user_id)
@@ -92,7 +95,7 @@ async def handle_payment(callback: types.CallbackQuery):
         await callback.message.answer("❌ Błąd podczas generowania linku do płatności.")
     await callback.answer()
 
-# Stripe Webhook — автоматическая проверка оплаты
+# === Stripe Webhook — автоматическая проверка оплаты ===
 async def stripe_webhook(request):
     payload = await request.read()
     sig_header = request.headers.get("Stripe-Signature")
@@ -104,7 +107,7 @@ async def stripe_webhook(request):
     except stripe.error.SignatureVerificationError:
         return web.Response(status=400)
 
-    # Оплата завершена успешно
+    # Оплата прошла успешно
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = session.get("metadata", {}).get("user_id")
@@ -130,12 +133,11 @@ async def stripe_webhook(request):
             except Exception as e:
                 await bot.send_message(
                     ADMIN_ID,
-                    f"⚠️ Błąd przy wysyłaniu linku użytkownikowi {user_id}:\n<code>{e}</code>",
-                    parse_mode="HTML"
+                    f"⚠️ Błąd przy wysyłaniu linku użytkownikowi {user_id}:\n<code>{e}</code>"
                 )
     return web.Response(status=200)
 
-# Проверка окончания подписок
+# === Проверка окончания подписок ===
 async def check_expired():
     already_notified = set()
     while True:
@@ -152,7 +154,7 @@ async def check_expired():
 
                 elif end_date <= now:
                     await bot.send_message(int(user_id), "❌ Twoja subskrypcja wygasła. Zostałeś usunięty z kanału.")
-                    await bot.kick_chat_member(CHANNEL_ID, int(user_id))
+                    await bot.ban_chat_member(CHANNEL_ID, int(user_id))
                     await asyncio.sleep(1)
                     await bot.unban_chat_member(CHANNEL_ID, int(user_id))
                     to_remove.append(user_id)
@@ -160,8 +162,7 @@ async def check_expired():
             except Exception as e:
                 await bot.send_message(
                     ADMIN_ID,
-                    f"⚠️ Błąd przy usuwaniu {user_id}:\n<code>{e}</code>",
-                    parse_mode="HTML"
+                    f"⚠️ Błąd przy usuwaniu {user_id}:\n<code>{e}</code>"
                 )
 
         for user_id in to_remove:
@@ -171,30 +172,26 @@ async def check_expired():
         await asyncio.sleep(86400)
         already_notified.clear()
 
-# Запуск вебхуков
-async def on_startup(dp):
-    await bot.set_webhook(WEBHOOK_URL)
-    asyncio.create_task(check_expired())
-
-async def on_shutdown(dp):
-    await bot.delete_webhook()
-
-def setup_web_app(dp):
+# === Запуск вебхуков ===
+def setup_web_app():
     app = web.Application()
     app.router.add_post(STRIPE_WEBHOOK_PATH, stripe_webhook)
     return app
 
+async def on_startup():
+    await bot.set_webhook(WEBHOOK_URL)
+    asyncio.create_task(check_expired())
+
+async def on_shutdown():
+    await bot.delete_webhook()
+
 if __name__ == "__main__":
     async def main():
-        await bot.set_webhook(WEBHOOK_URL)
-        asyncio.create_task(check_expired())
-        await dp.start_webhook(
-            webhook_path=WEBHOOK_PATH,
-            on_startup=on_startup,
-            on_shutdown=on_shutdown,
-            skip_updates=True,
-            host=WEBAPP_HOST,
-            port=WEBAPP_PORT,
-        )
+        await on_startup()
+        runner = web.AppRunner(setup_web_app())
+        await runner.setup()
+        site = web.TCPSite(runner, WEBAPP_HOST, WEBAPP_PORT)
+        await site.start()
+        await dp.start_polling(bot)
 
     asyncio.run(main())
