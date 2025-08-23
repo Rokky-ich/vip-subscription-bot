@@ -1,5 +1,6 @@
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.enums import ParseMode
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.executor import start_webhook
 from datetime import datetime, timedelta
 from aiohttp import web
