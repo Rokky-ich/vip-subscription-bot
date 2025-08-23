@@ -1,7 +1,6 @@
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.executor import start_webhook
 from datetime import datetime, timedelta
 from aiohttp import web
 import asyncio
@@ -186,13 +185,16 @@ def setup_web_app(dp):
     return app
 
 if __name__ == "__main__":
-    start_webhook(
-        dispatcher=dp,
-        webhook_path=WEBHOOK_PATH,
-        on_startup=on_startup,
-        on_shutdown=on_shutdown,
-        skip_updates=True,
-        host=WEBAPP_HOST,
-        port=WEBAPP_PORT,
-        web_app=setup_web_app(dp)
-    )
+    async def main():
+        await bot.set_webhook(WEBHOOK_URL)
+        asyncio.create_task(check_expired())
+        await dp.start_webhook(
+            webhook_path=WEBHOOK_PATH,
+            on_startup=on_startup,
+            on_shutdown=on_shutdown,
+            skip_updates=True,
+            host=WEBAPP_HOST,
+            port=WEBAPP_PORT,
+        )
+
+    asyncio.run(main())
