@@ -34,7 +34,7 @@ def save_subscriptions(data):
 
 subscriptions = load_subscriptions()
 
-# Обрабатываем и команду, и обычное сообщение "start"
+# Обрабатываем команду /start и кнопку start
 @dp.message_handler(commands=["start"])
 @dp.message_handler(lambda message: message.text.lower() in ["start", "/start", "🚀 start"])
 async def cmd_start(message: types.Message):
@@ -45,10 +45,18 @@ async def cmd_start(message: types.Message):
     )
     await message.answer("👋 Cześć! Wybierz jedną z opcji poniżej:", reply_markup=keyboard)
 
+# Обработка кнопки "Zapłaciłem"
 @dp.callback_query_handler(lambda c: c.data == "paid")
 async def handle_paid(callback: CallbackQuery):
     user_id = str(callback.from_user.id)
     username = callback.from_user.username or "brak nicku"
+
+    # Если запрос уже отправлен и ожидает ответа администратора
+    if user_id in pending_requests:
+        await callback.answer("❌ Twoja płatność nie została jeszcze potwierdzona. Skontaktuj się z administratorem.")
+        return
+
+    # Добавляем пользователя в список ожидания
     pending_requests[user_id] = username
 
     admin_keyboard = InlineKeyboardMarkup().add(
@@ -64,6 +72,7 @@ async def handle_paid(callback: CallbackQuery):
     )
     await callback.answer("Twoja prośba została wysłana do administratora. Poczekaj na zatwierdzenie.")
 
+# Обработка действий администратора
 @dp.callback_query_handler(lambda c: c.data.startswith("approve:") or c.data.startswith("deny:"))
 async def handle_admin_action(callback: CallbackQuery):
     action, user_id = callback.data.split(":")
@@ -101,7 +110,7 @@ async def handle_admin_action(callback: CallbackQuery):
     pending_requests.pop(user_id, None)
     await callback.answer()
 
-# Zadanie sprawdzające wygasłe subskrypcje
+# Проверка просроченных подписок
 async def check_expired():
     already_notified = set()
     while True:
