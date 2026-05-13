@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 
+from aiohttp import web
+import threading
+
 # =========================
 # CONFIG
 # =========================
@@ -234,10 +237,29 @@ async def on_startup(dp):
     print("BOT STARTED")
 
 # =========================
+# RENDER PORT
+# =========================
+
+async def health(request):
+    return web.Response(text="OK")
+
+def run_web():
+    app = web.Application()
+    app.router.add_get("/", health)
+
+    web.run_app(
+        app,
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
+
+# =========================
 # RUN
 # =========================
 
 if __name__ == "__main__":
+
+    threading.Thread(target=run_web).start()
 
     executor.start_polling(
         dp,
