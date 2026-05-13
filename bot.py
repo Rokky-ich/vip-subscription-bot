@@ -13,11 +13,11 @@ from aiogram.utils import executor
 # CONFIG
 # =========================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+API_TOKEN = os.getenv("API_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "2119400801"))
 
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
 DB_FILE = "db.json"
