@@ -248,10 +248,11 @@ def run_web():
     app.router.add_get("/", health)
 
     web.run_app(
-        app,
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000))
-    )
+    app,
+    host="0.0.0.0",
+    port=int(os.environ.get("PORT", 10000)),
+    handle_signals=False
+)
 
 # =========================
 # RUN
