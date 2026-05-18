@@ -108,7 +108,7 @@ async def user_join(event: types.ChatMemberUpdated):
         if not joined:
             return
 
-        user_id = event.from_user.id
+        user_id = event.new_chat_member.user.id
 
         invite_link = None
 
@@ -263,7 +263,8 @@ if __name__ == "__main__":
     threading.Thread(target=run_web).start()
 
     executor.start_polling(
-        dp,
-        skip_updates=True,
-        on_startup=on_startup
-    )
+    dp,
+    skip_updates=True,
+    on_startup=on_startup,
+    allowed_updates=["message", "chat_member"]
+)
