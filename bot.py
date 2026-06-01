@@ -123,6 +123,27 @@ async def user_join(event: types.ChatMemberUpdated):
 
         days = db["links"][invite_link]["days"]
 
+        try:
+            await bot.revoke_chat_invite_link(
+                chat_id=CHANNEL_ID,
+                invite_link=invite_link
+            )
+
+            db["links"].pop(invite_link, None)
+            save_db()
+
+            try:
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"🔒 Ссылка отключена после первого входа.\n"
+                    f"Пользователь: {user_id}"
+                )
+            except:
+                pass
+
+        except Exception as e:
+            print(f"Invite revoke error: {e}")
+
         expire_at = (
             datetime.now() + timedelta(days=days)
         ).timestamp()
