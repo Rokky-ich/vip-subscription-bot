@@ -1,4 +1,0 @@
-aiogram==2.25.2
-aiohttp==3.8.5
-stripe==8.6.0
-requests==2.32.3
