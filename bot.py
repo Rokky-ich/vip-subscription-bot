@@ -41,7 +41,7 @@ WEBAPP_PORT = int(os.getenv("PORT", "8000"))
 DB_FILE = "/data/subscriptions.json"  # база локальных подписок
 
 # Цены (в PLN)
-PRICE_INITIAL_PLN = int(os.getenv("PRICE_INITIAL_PLN", "99"))  # базовая покупка
+PRICE_INITIAL_PLN = int(os.getenv("PRICE_INITIAL_PLN", "159"))  # базовая покупка
 PRICE_RENEW_PLN   = int(os.getenv("PRICE_RENEW_PLN", "59"))     # продление
 
 # --- Параметры санитарки pending-сессий ---
@@ -62,8 +62,7 @@ def _empty_db():
     # subs: { user_id(str): "YYYY-MM-DD" }
     # pending: { user_id(str): {"id": "cs_...", "ts": 123, "kind": "initial"|"renew"} }
     # users: { user_id(str): {"username": str|null, "name": str|null, "first_seen": int, "last_seen": int} }
-    # processed: { "sessions": {sid: ts}, "intents": {pi: ts} }
-    return {"subs": {}, "pending": {}, "users": {}, "processed": {"sessions": {}, "intents": {}}}
+    return {"subs": {}, "pending": {}, "users": {}}
 
 def load_db():
     _ensure_data_dir()
@@ -79,15 +78,10 @@ def load_db():
         data = {"subs": data, "pending": {}, "users": {}}
     if "users" not in data:
         data["users"] = {}
-    proc = data.get("processed", {}) or {}
     return {
         "subs": dict(data.get("subs", {})),
         "pending": dict(data.get("pending", {})),
         "users": dict(data.get("users", {})),
-        "processed": {
-            "sessions": dict(proc.get("sessions", {})),
-            "intents": dict(proc.get("intents", {})),
-        },
     }
 
 def save_db(data: dict):
@@ -345,34 +339,6 @@ def _session_effectively_paid(session) -> tuple[bool, int | None]:
     return False, None
 
 
-# ---- Stripe idempotency helpers ----
-def _is_processed(session_or_obj) -> bool:
-    try:
-        sid = session_or_obj.get("id")
-        pi = session_or_obj.get("payment_intent")
-    except Exception:
-        sid = None
-        pi = None
-    if sid and sid in db.get("processed", {}).get("sessions", {}):
-        return True
-    if isinstance(pi, str) and pi in db.get("processed", {}).get("intents", {}):
-        return True
-    return False
-
-def _mark_processed(session_or_obj):
-    ts = _now_ts()
-    try:
-        sid = session_or_obj.get("id")
-        if sid:
-            db.setdefault("processed", {}).setdefault("sessions", {})[sid] = ts
-        pi = session_or_obj.get("payment_intent")
-        if isinstance(pi, str):
-            db.setdefault("processed", {}).setdefault("intents", {})[pi] = ts
-        save_db(db)
-    except Exception:
-        pass
-
-
 # -------- Клавиатуры --------
 def reply_persistent_kb() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
@@ -382,7 +348,7 @@ def reply_persistent_kb() -> ReplyKeyboardMarkup:
 def main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(row_width=1).add(
         InlineKeyboardButton("📞 Kontakt z administratorem", url="https://t.me/wawaadmin"),
-        InlineKeyboardButton("💳 VIP na miesiąc 99zl", callback_data="pay"),
+        InlineKeyboardButton("💳 VIP na miesiąc 159zl", callback_data="pay"),
         InlineKeyboardButton("✅ Zapłaciłem", callback_data="paid"),
     )
 
@@ -545,28 +511,10 @@ async def handle_paid(callback: types.CallbackQuery):
                 md = target.get("metadata") or {}
                 kind2 = md.get("kind") or "initial"
                 paid_ok, amount_pln = _session_effectively_paid(target)
-                if _is_processed(target):
-                    # already handled previously
-                    if kind2 == "initial":
-                        if await _is_in_channel(user_id):
-                            await callback.message.answer(
-                                "✅ Płatność potwierdzona! Dostęp jest już aktywny.\n"
-                                f"📅 Data końca: <b>{get_sub_end(user_id)}</b>"
-                            )
-                        else:
-                            await callback.message.answer(
-                                "✅ Płatność potwierdzona! Dostęp jest aktywny. Jeśli nie widzisz kanału, napisz do administratora."
-                            )
-                    else:
-                        await callback.message.answer(
-                            "✅ Płatność potwierdzona! Subskrypcja jest aktywna."
-                        )
-                    return
                 if amount_pln is None:
                     amt = target.get("amount_total")
                     amount_pln = int(amt // 100) if isinstance(amt, int) else (PRICE_RENEW_PLN if kind2 == "renew" else PRICE_INITIAL_PLN)
 
-                _mark_processed(target)
                 new_end = extend_30_days_from_current_or_today(get_sub_end(user_id))
                 set_sub_end(user_id, new_end)
                 pop_pending_session(user_id)
@@ -609,7 +557,7 @@ async def handle_paid(callback: types.CallbackQuery):
             await callback.message.answer(text, reply_markup=renew_offer_keyboard())
         else:
             await callback.message.answer(
-                "Nie widzę aktywnej płatności. Najpierw użyj „💳 VIP na miesiąc 99zl” lub „🔄 Przedłuż”.",
+                "Nie widzę aktywnej płatności. Najpierw użyj „💳 VIP na miesiąc 159zl” lub „🔄 Przedłuż”.",
                 reply_markup=main_keyboard()
             )
         return
@@ -623,28 +571,10 @@ async def handle_paid(callback: types.CallbackQuery):
 
     paid_ok, amount_pln = _session_effectively_paid(session)
     if paid_ok:
-        if _is_processed(session):
-            # Already processed earlier: just inform the user; no duplicate extend or link
-            if kind == "initial":
-                if await _is_in_channel(user_id):
-                    await callback.message.answer(
-                        "✅ Płatność potwierdzona! Dostęp jest już aktywny.\n"
-                        f"📅 Data końca: <b>{get_sub_end(user_id)}</b>"
-                    )
-                else:
-                    await callback.message.answer(
-                        "✅ Płatność potwierdzona! Dostęp jest aktywny. Jeśli nie widzisz kanału, napisz do administratora."
-                    )
-            else:
-                await callback.message.answer(
-                    "✅ Płatność potwierdzona! Subskrypcja jest aktywna."
-                )
-            return
         if amount_pln is None:
             amount_total = session.get("amount_total")
             amount_pln = int(amount_total // 100) if isinstance(amount_total, int) else (PRICE_RENEW_PLN if kind == "renew" else PRICE_INITIAL_PLN)
 
-        _mark_processed(session)
         new_end = extend_30_days_from_current_or_today(get_sub_end(user_id))
         set_sub_end(user_id, new_end)
         pop_pending_session(user_id)
@@ -1067,14 +997,10 @@ async def stripe_webhook(request: web.Request):
 
     if event.get("type") in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
         session = event["data"]["object"]
-        # Idempotency guard: Stripe may retry or send multiple related events (completed + async_payment_succeeded)
-        if _is_processed(session):
-            return web.Response(status=200)
         user_id = session.get("metadata", {}).get("user_id")
         kind = session.get("metadata", {}).get("kind", "initial")
         if user_id:
             user_id_int = int(user_id)
-            _mark_processed(session)
             new_end = extend_30_days_from_current_or_today(get_sub_end(user_id_int))
             set_sub_end(user_id_int, new_end)
 
