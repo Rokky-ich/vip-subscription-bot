@@ -28,7 +28,7 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 stripe.api_key = STRIPE_SECRET_KEY
 
-WEBHOOK_PATH = f"/webhook/{API_TOKEN}"            # Telegram webhook path
+WEBHOOK_PATH = "/webhook/telegram"               # Telegram webhook path (token is not exposed in URL)
 STRIPE_WEBHOOK_PATH = "/webhook/stripe"           # Stripe webhook path
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -51,6 +51,9 @@ PENDING_SWEEP_SEC  = int(os.getenv("PENDING_SWEEP_SEC", "300")) # 5 мин
 # -------- Бот/диспетчер --------
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
+
+def log_exception(prefix: str, exc: Exception):
+    print(f"{prefix} {type(exc).__name__}: {exc}", flush=True)
 
 # -------- Утилиты БД (расширенная схема) --------
 def _ensure_data_dir():
@@ -128,8 +131,8 @@ def track_user_from_callback(cb: types.CallbackQuery):
         entry["name"] = u.full_name or entry.get("name")
         db["users"][uid] = entry
         save_db(db)
-    except Exception:
-        pass
+    except Exception as e:
+        log_exception("[USER TRACK CALLBACK ERROR]", e)
 
 # ---- subs/pending ----
 def get_sub_end(user_id: int):
@@ -297,8 +300,9 @@ def _cancel_url():
 
 async def create_checkout_session(user_id: int, amount_pln: int, product_name: str, kind: str):
     print(
-        f"[STRIPE] create_checkout_session START: "
-        f"user_id={user_id}, amount={amount_pln} PLN, kind={kind}"
+        f"[STRIPE] CREATE START user_id={user_id} amount={amount_pln} "
+        f"kind={kind} payment_methods=card,blik",
+        flush=True
     )
     try:
         expire_and_clear_pending_if_open(user_id)
@@ -319,12 +323,13 @@ async def create_checkout_session(user_id: int, amount_pln: int, product_name: s
         )
         set_pending_session(user_id, session.id, kind)
         print(
-            f"[STRIPE] create_checkout_session OK: "
-            f"session_id={session.id}, url_present={bool(session.url)}"
+            f"[STRIPE] CREATE OK session_id={session.id} "
+            f"url_present={bool(session.url)}",
+            flush=True
         )
         return session.url
     except Exception as e:
-        print(f"[STRIPE] create_checkout_session ERROR: {type(e).__name__}: {e}")
+        log_exception("[STRIPE] CREATE ERROR", e)
         return None
 
 def _session_effectively_paid(session) -> tuple[bool, int | None]:
@@ -409,8 +414,8 @@ def paid_inline_keyboard() -> InlineKeyboardMarkup:
 async def _cb_ack(cb: types.CallbackQuery):
     try:
         await cb.answer()
-    except Exception:
-        pass
+    except Exception as e:
+        log_exception("[CALLBACK ACK ERROR]", e)
 
 async def _safe_edit_text(msg: types.Message, text: str, reply_markup=None):
     try:
@@ -434,10 +439,6 @@ async def _safe_edit_text(msg: types.Message, text: str, reply_markup=None):
 # -------- /start и алиас для 🚀START --------
 @dp.message_handler(commands=["start"])
 async def cmd_start(message: types.Message):
-    print(
-        f"[MESSAGE] /start received: "
-        f"user_id={message.from_user.id}, text={message.text!r}"
-    )
     track_user_from_message(message)
     user_id = message.from_user.id
     item = peek_pending_session(user_id)
@@ -468,10 +469,9 @@ async def start_button_alias(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data == "pay")
 async def handle_payment(callback: types.CallbackQuery):
     print(
-        f"[CALLBACK] pay received: "
-        f"user_id={callback.from_user.id}, "
-        f"data={callback.data}, "
-        f"message_id={getattr(callback.message, 'message_id', None)}"
+        f"[PAY CALLBACK] RECEIVED user_id={callback.from_user.id} "
+        f"data={callback.data!r} callback_id={callback.id}",
+        flush=True
     )
     await _cb_ack(callback)
     track_user_from_callback(callback)
@@ -509,6 +509,11 @@ async def handle_payment(callback: types.CallbackQuery):
 # -------- Продление --------
 @dp.callback_query_handler(lambda c: c.data == "renew")
 async def handle_renew(callback: types.CallbackQuery):
+    print(
+        f"[RENEW CALLBACK] RECEIVED user_id={callback.from_user.id} "
+        f"data={callback.data!r} callback_id={callback.id}",
+        flush=True
+    )
     await _cb_ack(callback)
     track_user_from_callback(callback)
     user_id = callback.from_user.id
@@ -538,6 +543,11 @@ async def handle_no_renew(callback: types.CallbackQuery):
 # -------- Ручная проверка "Zapłaciłem" --------
 @dp.callback_query_handler(lambda c: c.data == "paid")
 async def handle_paid(callback: types.CallbackQuery):
+    print(
+        f"[PAID CALLBACK] RECEIVED user_id={callback.from_user.id} "
+        f"data={callback.data!r} callback_id={callback.id}",
+        flush=True
+    )
     await _cb_ack(callback)
     track_user_from_callback(callback)
     user_id = callback.from_user.id
@@ -1176,88 +1186,100 @@ async def check_expired():
         await asyncio.sleep(86400)
         already_notified.clear()
 
-# -------- Telegram: трекинг любых callback --------
-@dp.callback_query_handler()
-async def track_fallback(cb: types.CallbackQuery):
-    print(
-        f"[CALLBACK FALLBACK] data={cb.data!r}, "
-        f"user_id={cb.from_user.id}"
-    )
-    await _cb_ack(cb)
-    track_user_from_callback(cb)
-
+# -------- Telegram: callback fallback removed intentionally --------
 # -------- Telegram вебхук-хендлер --------
 async def telegram_webhook(request: web.Request):
     print(
-        f"[TELEGRAM WEBHOOK] request: "
-        f"method={request.method}, path={request.path}"
+        f"[TELEGRAM WEBHOOK] IN method={request.method} path={request.path}",
+        flush=True
     )
+
     try:
         data = await request.json()
     except Exception as e:
-        print(f"[TELEGRAM WEBHOOK] JSON ERROR: {type(e).__name__}: {e}")
-        return web.Response(status=400)
+        log_exception("[TELEGRAM WEBHOOK] JSON ERROR", e)
+        return web.Response(status=400, text="bad json")
 
     try:
         update = types.Update(**data)
-        update_type = "unknown"
-        if update.message:
-            update_type = f"message:{update.message.text!r}"
-        elif update.callback_query:
-            update_type = (
-                f"callback:{update.callback_query.data!r},"
-                f"user:{update.callback_query.from_user.id}"
+
+        if update.callback_query:
+            print(
+                f"[TELEGRAM UPDATE] CALLBACK "
+                f"update_id={update.update_id} "
+                f"data={update.callback_query.data!r} "
+                f"user_id={update.callback_query.from_user.id}",
+                flush=True
             )
-        print(f"[TELEGRAM WEBHOOK] update_id={update.update_id}, type={update_type}")
+        elif update.message:
+            print(
+                f"[TELEGRAM UPDATE] MESSAGE "
+                f"update_id={update.update_id} "
+                f"text={update.message.text!r} "
+                f"user_id={update.message.from_user.id}",
+                flush=True
+            )
+        else:
+            print(
+                f"[TELEGRAM UPDATE] OTHER update_id={update.update_id}",
+                flush=True
+            )
 
         Bot.set_current(bot)
         Dispatcher.set_current(dp)
 
         await dp.process_update(update)
-        print(f"[TELEGRAM WEBHOOK] processed update_id={update.update_id}")
-        return web.Response(text="OK")
-    except Exception as e:
+
         print(
-            f"[TELEGRAM WEBHOOK] PROCESS ERROR: "
-            f"{type(e).__name__}: {e}"
+            f"[TELEGRAM WEBHOOK] OUT update_id={update.update_id} status=200",
+            flush=True
         )
-        return web.Response(status=500)
+        return web.Response(text="OK")
+
+    except Exception as e:
+        log_exception("[TELEGRAM WEBHOOK] PROCESS ERROR", e)
+        return web.Response(status=500, text="internal error")
 
 # -------- Хуки запуска/остановки --------
 async def on_startup_app(app: web.Application):
-    print(f"[STARTUP] WEBHOOK_URL={WEBHOOK_URL}")
-    print(f"[STARTUP] WEBHOOK_HOST={WEBHOOK_HOST}")
-    print(f"[STARTUP] CHANNEL_ID={CHANNEL_ID}")
-    print(f"[STARTUP] BOT_USERNAME={BOT_USERNAME}")
+    print(f"[STARTUP] WEBHOOK_HOST={WEBHOOK_HOST}", flush=True)
+    print(f"[STARTUP] WEBHOOK_PATH={WEBHOOK_PATH}", flush=True)
+    print(f"[STARTUP] CHANNEL_ID={CHANNEL_ID}", flush=True)
+    print(f"[STARTUP] BOT_USERNAME={BOT_USERNAME}", flush=True)
 
     try:
         await bot.set_webhook(WEBHOOK_URL)
-        print("[TELEGRAM] set_webhook: OK")
+        print("[TELEGRAM] set_webhook: OK", flush=True)
     except Exception as e:
-        print(f"[TELEGRAM] set_webhook ERROR: {type(e).__name__}: {e}")
+        log_exception("[TELEGRAM] set_webhook ERROR", e)
 
     try:
         info = await bot.get_webhook_info()
         print(
-            "[TELEGRAM] webhook_info: "
-            f"url={getattr(info, 'url', None)}, "
-            f"pending={getattr(info, 'pending_update_count', None)}, "
-            f"last_error_date={getattr(info, 'last_error_date', None)}, "
-            f"last_error_message={getattr(info, 'last_error_message', None)}"
+            "[TELEGRAM] webhook_info "
+            f"url={getattr(info, 'url', None)} "
+            f"pending={getattr(info, 'pending_update_count', None)} "
+            f"last_error_date={getattr(info, 'last_error_date', None)} "
+            f"last_error_message={getattr(info, 'last_error_message', None)}",
+            flush=True
         )
     except Exception as e:
-        print(f"[TELEGRAM] get_webhook_info ERROR: {type(e).__name__}: {e}")
+        log_exception("[TELEGRAM] get_webhook_info ERROR", e)
 
     asyncio.create_task(check_expired())
     asyncio.create_task(sanitize_pending_loop())
 
 async def on_shutdown_app(app: web.Application):
-    await bot.delete_webhook()
-    # закрываем aiohttp-сессию, чтобы не было Unclosed client session
     try:
-        await bot.session.close()
-    except Exception:
-        pass
+        await bot.delete_webhook()
+    except Exception as e:
+        log_exception("[TELEGRAM] delete_webhook ERROR", e)
+
+    try:
+        session = await bot.get_session()
+        await session.close()
+    except Exception as e:
+        log_exception("[TELEGRAM] session close ERROR", e)
 
 # -------- Точка входа --------
 def build_app() -> web.Application:
@@ -1278,9 +1300,10 @@ def build_app() -> web.Application:
                 "last_error_message": getattr(info, "last_error_message", None),
             })
         except Exception as e:
-            return web.json_response({
-                "error": f"{type(e).__name__}: {e}"
-            }, status=500)
+            return web.json_response(
+                {"error": f"{type(e).__name__}: {e}"},
+                status=500
+            )
 
     app.router.add_get("/telegram-status", telegram_status)
     app.on_startup.append(on_startup_app)
