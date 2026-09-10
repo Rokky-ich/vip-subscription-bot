@@ -1,5 +1,5 @@
 # bot.py (aiogram 2.25.2)
-# база + продление 59 PLN (без ссылки) + "уже подписан"
+# база + продление 49 PLN (без ссылки) + "уже подписан"
 # авто-чистка pending + санитарка pending + уведомления админу
 # постоянная кнопка 🚀START
 # АДМИНКА: /admin, /give_link, /who, /extend, /find, /revoke
@@ -42,7 +42,7 @@ DB_FILE = "/data/subscriptions.json"  # база локальных подпис
 
 # Цены (в PLN)
 PRICE_INITIAL_PLN = int(os.getenv("PRICE_INITIAL_PLN", "99"))  # базовая покупка
-PRICE_RENEW_PLN   = int(os.getenv("PRICE_RENEW_PLN", "59"))     # продление
+PRICE_RENEW_PLN   = int(os.getenv("PRICE_RENEW_PLN", "49"))     # продление
 
 # --- Параметры санитарки pending-сессий ---
 PENDING_TTL_SEC    = int(os.getenv("PENDING_TTL_SEC", "1800"))  # 30 мин
