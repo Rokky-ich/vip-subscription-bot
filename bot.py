@@ -28,7 +28,7 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 stripe.api_key = STRIPE_SECRET_KEY
 
-WEBHOOK_PATH = f"/webhook/{API_TOKEN}"            # Telegram webhook path
+WEBHOOK_PATH = "/webhook/telegram"               # Telegram webhook path
 STRIPE_WEBHOOK_PATH = "/webhook/stripe"           # Stripe webhook path
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -97,9 +97,39 @@ def save_db(data: dict):
 
 db = load_db()
 
+# Очистка исторического списка пользователей ОДИН РАЗ.
+# subs, pending и processed не затрагиваются.
+# Маркер хранится на persistent-диске, поэтому после обычного рестарта
+# уже накопленные новые пользователи не будут удаляться снова.
+USERS_RESET_MARKER = "/data/users_reset_v5.done"
+if not os.path.exists(USERS_RESET_MARKER):
+    old_users_count = len(db.get("users", {}))
+    db["users"] = {}
+    save_db(db)
+    try:
+        with open(USERS_RESET_MARKER, "w", encoding="utf-8") as f:
+            f.write(str(int(time.time())))
+        print(
+            f"[USERS RESET] Removed {old_users_count} historical users; "
+            "subscriptions/payments preserved."
+        )
+    except Exception as e:
+        print(f"[USERS RESET] Marker creation failed: {e}")
+
 # ---- users трекинг ----
 def _now_ts() -> int:
     return int(time.time())
+
+def remove_user_from_registry(user_id: int):
+    """Удаляет пользователя только из users; подписку и платежи не трогает."""
+    try:
+        uid = str(user_id)
+        if uid in db["users"]:
+            db["users"].pop(uid, None)
+            save_db(db)
+            print(f"[USERS] Removed unavailable user {uid}.")
+    except Exception as e:
+        print(f"[USERS] Failed to remove user {user_id}: {e}")
 
 def track_user_from_message(message: types.Message):
     try:
@@ -426,19 +456,35 @@ async def _safe_edit_text(msg: types.Message, text: str, reply_markup=None):
 # -------- /start и алиас для 🚀START --------
 @dp.message_handler(commands=["start"])
 async def cmd_start(message: types.Message):
-    track_user_from_message(message)
     user_id = message.from_user.id
+    track_user_from_message(message)
     item = peek_pending_session(user_id)
-    if item:
-        await message.answer(
-            "👋 Cześć! Widzę, że masz rozpoczętą płatność.\n"
-            "Jeśli już opłaciłeś (w tym BLIK), naciśnij „✅ Zapłaciłem”.",
-            reply_markup=reply_persistent_kb()
-        )
-        await message.answer("👇 Wybierz działanie:", reply_markup=main_keyboard())
-    else:
-        await message.answer("👋 Cześć! Kliknij przyciski poniżej:", reply_markup=reply_persistent_kb())
-        await message.answer("👇 Menu:", reply_markup=main_keyboard())
+    try:
+        if item:
+            await message.answer(
+                "👋 Cześć! Widzę, że masz rozpoczętą płatność.\n"
+                "Jeśli już opłaciłeś (w tym BLIK), naciśnij „✅ Zapłaciłem”.",
+                reply_markup=reply_persistent_kb()
+            )
+        else:
+            await message.answer("👋 Cześć! Kliknij przyciski poniżej:", reply_markup=reply_persistent_kb())
+            await message.answer("👇 Menu:", reply_markup=main_keyboard())
+    except Exception as e:
+        # Удалённый/заблокировавший бота пользователь не должен ломать webhook.
+        name = type(e).__name__
+        msg = str(e).lower()
+        if (
+            "UserDeactivated" in name
+            or "user is deactivated" in msg
+            or "BotBlocked" in name
+            or "bot was blocked" in msg
+            or "ChatNotFound" in name
+        ):
+            remove_user_from_registry(user_id)
+            print(f"[TELEGRAM] User {user_id} unavailable ({name}); skipped.")
+            return
+        print(f"[START ERROR] user={user_id} {name}: {e}")
+        return
 
 def _is_start_btn_text(text: str) -> bool:
     if not text:
@@ -1171,16 +1217,28 @@ async def telegram_webhook(request: web.Request):
     except Exception:
         return web.Response(status=400)
 
-    update = types.Update(**data)
+    try:
+        update = types.Update(**data)
+        Bot.set_current(bot)
+        Dispatcher.set_current(dp)
+        await dp.process_update(update)
+    except Exception as e:
+        update_id = data.get("update_id") if isinstance(data, dict) else None
+        print(
+            f"[TELEGRAM WEBHOOK ERROR] update_id={update_id} "
+            f"{type(e).__name__}: {e}"
+        )
 
-    Bot.set_current(bot)
-    Dispatcher.set_current(dp)
-
-    await dp.process_update(update)
+    # Один плохой update не должен превращать webhook в 500.
     return web.Response(text="OK")
 
 # -------- Хуки запуска/остановки --------
 async def on_startup_app(app: web.Application):
+    print(
+        f"[STARTUP] users={len(db.get('users', {}))}, "
+        f"subs={len(db.get('subs', {}))}, "
+        f"pending={len(db.get('pending', {}))}"
+    )
     await bot.set_webhook(
             WEBHOOK_URL,
             allowed_updates=["message", "callback_query"]
