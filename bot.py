@@ -97,24 +97,35 @@ def save_db(data: dict):
 
 db = load_db()
 
-# Очистка исторического списка пользователей ОДИН РАЗ.
-# subs, pending и processed не затрагиваются.
-# Маркер хранится на persistent-диске, поэтому после обычного рестарта
-# уже накопленные новые пользователи не будут удаляться снова.
-USERS_RESET_MARKER = "/data/users_reset_v5.done"
-if not os.path.exists(USERS_RESET_MARKER):
-    old_users_count = len(db.get("users", {}))
-    db["users"] = {}
-    save_db(db)
+# ---- безопасная отправка сообщений ----
+async def safe_send_message(chat_id, text, **kwargs):
+    """Отправляет сообщение и не дает мертвому Telegram-аккаунту
+    остановить фоновые задачи. Если аккаунт удален/заблокировал бота,
+    он удаляется только из users; подписки и платежи не трогаются.
+    """
     try:
-        with open(USERS_RESET_MARKER, "w", encoding="utf-8") as f:
-            f.write(str(int(time.time())))
-        print(
-            f"[USERS RESET] Removed {old_users_count} historical users; "
-            "subscriptions/payments preserved."
-        )
+        return await bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
-        print(f"[USERS RESET] Marker creation failed: {e}")
+        name = type(e).__name__
+        msg = str(e).lower()
+        unavailable = (
+            "UserDeactivated" in name
+            or "user is deactivated" in msg
+            or "BotBlocked" in name
+            or "bot was blocked" in msg
+            or "ChatNotFound" in name
+            or "chat not found" in msg
+        )
+        if unavailable:
+            try:
+                uid = int(chat_id)
+                remove_user_from_registry(uid)
+            except Exception:
+                pass
+            print(f"[TELEGRAM] User {chat_id} unavailable ({name}); skipped.")
+            return None
+        print(f"[TELEGRAM SEND ERROR] chat_id={chat_id} {name}: {e}")
+        return None
 
 # ---- users трекинг ----
 def _now_ts() -> int:
@@ -1173,7 +1184,7 @@ async def check_expired():
                 end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
 
                 if end_date == now + timedelta(days=1) and user_id not in already_notified:
-                    await bot.send_message(
+                    await safe_send_message(
                         int(user_id),
                         "⏳ Twoja subskrypcja <b>VIP_WAWA</b> kończy się jutro.\n"
                         f"Możesz przedłużyć ją teraz za <b>{PRICE_RENEW_PLN} PLN</b>.",
@@ -1191,11 +1202,11 @@ async def check_expired():
                         await asyncio.sleep(1)
                         await bot.unban_chat_member(CHANNEL_ID, int(user_id))
                     except Exception as e:
-                        await bot.send_message(ADMIN_ID, f"⚠️ Błąd przy usuwaniu {user_id}:\n<code>{e}</code>")
+                        await safe_send_message(ADMIN_ID, f"⚠️ Błąd przy usuwaniu {user_id}:\n<code>{e}</code>")
                     to_remove.append(user_id)
 
             except Exception as e:
-                await bot.send_message(ADMIN_ID, f"⚠️ Błąd przy przetwarzaniu {user_id}:\n<code>{e}</code>")
+                await safe_send_message(ADMIN_ID, f"⚠️ Błąd przy przetwarzaniu {user_id}:\n<code>{e}</code>")
 
         for uid in to_remove:
             db["subs"].pop(uid, None)
